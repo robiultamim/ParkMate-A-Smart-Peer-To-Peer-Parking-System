@@ -154,57 +154,6 @@ export function EarningsPage({ onNavigate }: EarningsPageProps) {
         </Card>
       </div>
 
-      {/* Enhanced Quick Actions */}
-      <Card className="glass-card professional-shadow-lg p-8 border-0">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h3 className="text-2xl font-semibold text-gray-900">Quick Actions</h3>
-            <p className="text-gray-600 mt-1">Manage your earnings and reports</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Button 
-            className="flex flex-col items-center gap-4 p-6 h-auto bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 hover:scale-105 hover:shadow-2xl transition-all duration-300 cursor-pointer professional-shadow rounded-xl"
-            onClick={() => onNavigate?.('withdrawal')}
-          >
-            <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-              <Download className="w-6 h-6" />
-            </div>
-            <div className="text-center">
-              <div className="font-semibold text-lg">Withdraw</div>
-              <div className="text-sm opacity-90">${earningsData.pendingWithdrawal.toFixed(2)} available</div>
-            </div>
-          </Button>
-          <Button variant="outline" className="flex flex-col items-center gap-4 p-6 h-auto border-2 border-purple-200 hover:border-purple-400 hover:bg-purple-50 hover-lift rounded-xl">
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-blue-100 rounded-xl flex items-center justify-center">
-              <Eye className="w-6 h-6 text-purple-600" />
-            </div>
-            <div className="text-center">
-              <div className="font-semibold text-lg text-gray-900">Reports</div>
-              <div className="text-sm text-gray-600">Download statements</div>
-            </div>
-          </Button>
-          <Button variant="outline" className="flex flex-col items-center gap-4 p-6 h-auto border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 hover-lift rounded-xl">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl flex items-center justify-center">
-              <PieChart className="w-6 h-6 text-blue-600" />
-            </div>
-            <div className="text-center">
-              <div className="font-semibold text-lg text-gray-900">Analytics</div>
-              <div className="text-sm text-gray-600">Performance insights</div>
-            </div>
-          </Button>
-          <Button variant="outline" className="flex flex-col items-center gap-4 p-6 h-auto border-2 border-green-200 hover:border-green-400 hover:bg-green-50 hover-lift rounded-xl">
-            <div className="w-12 h-12 bg-gradient-to-br from-green-100 to-emerald-100 rounded-xl flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-green-600" />
-            </div>
-            <div className="text-center">
-              <div className="font-semibold text-lg text-gray-900">Optimize</div>
-              <div className="text-sm text-gray-600">Boost earnings</div>
-            </div>
-          </Button>
-        </div>
-      </Card>
-
       {/* Earnings Tabs */}
       <Tabs defaultValue="recent" className="space-y-4">
         <TabsList className="grid w-full grid-cols-2 bg-white/80 backdrop-blur-sm">
