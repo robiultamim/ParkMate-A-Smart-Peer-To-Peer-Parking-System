@@ -3,7 +3,7 @@ import {
   Navigation,
   MapPin,
   Clock,
-  Route,
+  Navigation2,
   Car,
   AlertTriangle,
   Volume2,
@@ -230,7 +230,7 @@ export function GPSNavigationPage() {
               <div className="text-sm text-blue-700">remaining</div>
             </div>
           </div>
-          
+
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -277,16 +277,15 @@ export function GPSNavigationPage() {
               {alternativeRoutes.map((route) => (
                 <Card
                   key={route.id}
-                  className={`p-4 border-2 cursor-pointer transition-all duration-200 ${
-                    route.isCurrent
-                      ? "border-blue-300 bg-blue-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
+                  className={`p-4 border-2 cursor-pointer transition-all duration-200 ${route.isCurrent
+                    ? "border-blue-300 bg-blue-50"
+                    : "border-gray-200 hover:border-gray-300"
+                    }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center">
-                        <Route className="w-5 h-5 text-blue-600" />
+                        <Navigation2 className="w-5 h-5 text-blue-600" />
                       </div>
                       <div>
                         <h4 className="font-medium text-gray-900 mb-1">
@@ -350,45 +349,41 @@ export function GPSNavigationPage() {
               {navigationSteps.map((step, index) => (
                 <div
                   key={index}
-                  className={`flex items-center gap-4 p-4 rounded-lg transition-all duration-200 ${
-                    isNavigating && index === currentStep
-                      ? "bg-blue-50 border-2 border-blue-200"
-                      : index < currentStep
+                  className={`flex items-center gap-4 p-4 rounded-lg transition-all duration-200 ${isNavigating && index === currentStep
+                    ? "bg-blue-50 border-2 border-blue-200"
+                    : index < currentStep
                       ? "bg-green-50 border border-green-200"
                       : "bg-gray-50 border border-gray-200"
-                  }`}
+                    }`}
                 >
                   <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      isNavigating && index === currentStep
-                        ? "bg-blue-600 text-white"
-                        : index < currentStep
+                    className={`w-10 h-10 rounded-full flex items-center justify-center ${isNavigating && index === currentStep
+                      ? "bg-blue-600 text-white"
+                      : index < currentStep
                         ? "bg-green-600 text-white"
                         : "bg-gray-300 text-gray-600"
-                    }`}
+                      }`}
                   >
                     {React.createElement(step.icon, { className: "w-5 h-5" })}
                   </div>
                   <div className="flex-1">
                     <h4
-                      className={`font-medium mb-1 ${
-                        isNavigating && index === currentStep
-                          ? "text-blue-900"
-                          : index < currentStep
+                      className={`font-medium mb-1 ${isNavigating && index === currentStep
+                        ? "text-blue-900"
+                        : index < currentStep
                           ? "text-green-900"
                           : "text-gray-900"
-                      }`}
+                        }`}
                     >
                       {step.instruction}
                     </h4>
                     <p
-                      className={`text-sm ${
-                        isNavigating && index === currentStep
-                          ? "text-blue-700"
-                          : index < currentStep
+                      className={`text-sm ${isNavigating && index === currentStep
+                        ? "text-blue-700"
+                        : index < currentStep
                           ? "text-green-700"
                           : "text-gray-600"
-                      }`}
+                        }`}
                     >
                       {step.distance} • {step.duration}
                     </p>
@@ -460,7 +455,7 @@ export function GPSNavigationPage() {
             <h3 className="text-lg font-semibold text-gray-900 mb-4">
               Navigation Preferences
             </h3>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <h4 className="font-medium text-gray-900">Avoid</h4>

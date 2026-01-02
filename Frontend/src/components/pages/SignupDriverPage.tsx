@@ -6,6 +6,8 @@ import { Card } from '../ui/card';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { ParkMateLogo } from '../ui/parkmate-logo';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 
 interface SignupDriverPageProps {
   onNavigateBack: () => void;
@@ -15,9 +17,11 @@ interface SignupDriverPageProps {
 }
 
 export function SignupDriverPage({ onNavigateBack, onNavigateToLogin, onNavigateToOwnerSignup, onSignup }: SignupDriverPageProps) {
+  const { signUp } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -31,12 +35,54 @@ export function SignupDriverPage({ onNavigateBack, onNavigateToLogin, onNavigate
     agreesToNewsletters: false
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (currentStep < 2) {
+      // Validate step 1
+      if (!formData.firstName || !formData.lastName || !formData.email || !formData.phone || !formData.password || !formData.confirmPassword) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
+      if (formData.password !== formData.confirmPassword) {
+        toast.error('Passwords do not match');
+        return;
+      }
+      if (formData.password.length < 6) {
+        toast.error('Password must be at least 6 characters');
+        return;
+      }
       setCurrentStep(currentStep + 1);
     } else {
-      onSignup({ ...formData, userType: 'driver' });
+      // Validate step 2
+      if (!formData.agreesToTerms) {
+        toast.error('Please agree to the Terms of Service and Privacy Policy');
+        return;
+      }
+      
+      setIsLoading(true);
+      try {
+        const result = await signUp({
+          email: formData.email,
+          password: formData.password,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone,
+          role: 'driver',
+          vehicleType: formData.vehicleType || undefined,
+          vehiclePlate: formData.vehiclePlate || undefined,
+        });
+
+        if (result.success) {
+          onSignup({ ...formData, userType: 'driver' });
+        } else {
+          toast.error(result.error || 'Failed to create account');
+        }
+      } catch (error: any) {
+        toast.error(error.message || 'An error occurred during signup');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -378,9 +424,10 @@ export function SignupDriverPage({ onNavigateBack, onNavigateToLogin, onNavigate
               )}
               <Button 
                 type="submit"
-                className={`${currentStep === 1 ? 'w-full' : 'flex-1'} bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 h-12 rounded-lg transition-all duration-200 hover:shadow-lg`}
+                disabled={isLoading}
+                className={`${currentStep === 1 ? 'w-full' : 'flex-1'} bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 h-12 rounded-lg transition-all duration-200 hover:shadow-lg disabled:opacity-50`}
               >
-                {currentStep === 1 ? 'Continue' : 'Create Account'}
+                {isLoading ? 'Creating Account...' : currentStep === 1 ? 'Continue' : 'Create Account'}
               </Button>
             </div>
           </form>

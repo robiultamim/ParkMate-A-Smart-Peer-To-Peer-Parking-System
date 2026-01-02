@@ -2,13 +2,10 @@ import { useState } from "react";
 import {
   Search,
   MapPin,
-  Clock,
-  Star,
   Menu,
   User,
   Heart,
   Settings,
-  Filter,
   CreditCard,
   Timer,
   Shield,
@@ -21,7 +18,6 @@ import {
   LogOut,
   Home,
   Calendar,
-  FileText,
   HelpCircle,
   X,
 } from "lucide-react";
@@ -31,12 +27,12 @@ import { Badge } from "./badge";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 import { Separator } from "./separator";
 import { ScrollArea } from "./scroll-area";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
 } from "./dropdown-menu";
 import { ParkMateLogo } from "./parkmate-logo";
 
@@ -199,14 +195,14 @@ export function ModernFixedHeader({
         <div className="absolute inset-0 bg-white/95 backdrop-blur-md"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-purple-600/5 via-transparent to-blue-600/5"></div>
         <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-purple-200 to-transparent"></div>
-        
+
         <div className="relative px-4 lg:px-6">
           <div className="flex items-center justify-between h-16">
             {/* Left Section - ParkMate Logo */}
             <div className="flex items-center animate-slide-in-left">
-              <ParkMateLogo 
-                size="sm" 
-                variant="compact" 
+              <ParkMateLogo
+                size="sm"
+                variant="compact"
                 className="hover:scale-105 transition-transform duration-300 cursor-pointer"
                 animated={false}
               />
@@ -215,7 +211,7 @@ export function ModernFixedHeader({
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
               </div>
             </div>
-            
+
             {/* Breadcrumb / Context Indicator */}
             <div className="hidden md:flex items-center gap-2 bg-gray-50 rounded-full px-3 py-1 animate-fade-in">
               <Home className="w-3 h-3 text-gray-400" />
@@ -234,8 +230,8 @@ export function ModernFixedHeader({
                     onClick={item.onClick}
                     className={`
                       flex items-center gap-2 px-3 py-2 rounded-xl transition-all duration-300 interactive-button
-                      ${item.isActive 
-                        ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg hover-glow" 
+                      ${item.isActive
+                        ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg hover-glow"
                         : "text-gray-600 hover:text-gray-900 hover:bg-gray-50/80 hover-lift"
                       }
                     `}
@@ -273,7 +269,7 @@ export function ModernFixedHeader({
                   </Button>
                 </div>
               )}
-              
+
               {/* Enhanced Notifications */}
               <Button
                 variant="ghost"
@@ -283,8 +279,8 @@ export function ModernFixedHeader({
               >
                 <Bell className="w-5 h-5 text-gray-600" />
                 {notificationCount > 0 && (
-                  <Badge 
-                    variant="destructive" 
+                  <Badge
+                    variant="destructive"
                     className="absolute -top-1 -right-1 w-5 h-5 p-0 flex items-center justify-center text-xs notification-badge"
                   >
                     {notificationCount}
@@ -327,7 +323,14 @@ export function ModernFixedHeader({
                     Help & Support
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={onLogout} className="text-red-600">
+                  <DropdownMenuItem
+                    onSelect={(e: Event) => {
+                      e.preventDefault(); // Prevent default to handle async manually if needed, though here we just call onLogout
+                      console.log("Logout clicked");
+                      onLogout();
+                    }}
+                    className="text-red-600 cursor-pointer"
+                  >
                     <LogOut className="w-4 h-4 mr-2" />
                     Logout
                   </DropdownMenuItem>
@@ -368,8 +371,8 @@ export function ModernFixedHeader({
                       }}
                       className={`
                         flex flex-col items-center gap-2 h-20 w-full
-                        ${item.isActive 
-                          ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white" 
+                        ${item.isActive
+                          ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white"
                           : "text-gray-600 hover:text-gray-900"
                         }
                       `}

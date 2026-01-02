@@ -8,13 +8,13 @@ import {
   MapPin,
   Moon,
   Sun,
-  Globe,
-  Smartphone,
-  Lock,
   Eye,
   EyeOff,
   Save,
   RefreshCw,
+  Car,
+  Building,
+  Plus,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -25,9 +25,14 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { useAuth } from "../../contexts/AuthContext";
+import { addRoleToProfile } from "../../lib/addRole";
+import { toast } from "sonner";
 
 export function SettingsPage() {
+  const { profile, refreshProfile } = useAuth();
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isAddingRole, setIsAddingRole] = useState(false);
   const [notifications, setNotifications] = useState({
     bookingUpdates: true,
     paymentAlerts: true,
@@ -49,6 +54,27 @@ export function SettingsPage() {
   const handlePrivacyChange = (key: string, value: boolean) => {
     setPrivacy(prev => ({ ...prev, [key]: value }));
   };
+
+  const handleAddRole = async (role: 'driver' | 'house_owner') => {
+    setIsAddingRole(true);
+    try {
+      const result = await addRoleToProfile(role);
+      if (result.success) {
+        // Refresh the profile to get updated roles
+        await refreshProfile();
+      } else {
+        toast.error(result.error || 'Failed to add role');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'An error occurred');
+    } finally {
+      setIsAddingRole(false);
+    }
+  };
+
+  const hasDriverRole = profile?.role?.includes('driver');
+  const hasOwnerRole = profile?.role?.includes('house_owner');
+  const hasBothRoles = hasDriverRole && hasOwnerRole;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 pt-20">
@@ -187,6 +213,84 @@ export function SettingsPage() {
                 </div>
               </div>
             </Card>
+
+            <Card className="p-6">
+              <h3 className="text-xl font-semibold mb-4">Role Management</h3>
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <p className="text-sm text-gray-600">Current Roles:</p>
+                  <div className="flex gap-2">
+                    {hasDriverRole && (
+                      <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200">
+                        <Car className="w-3 h-3 mr-1" />
+                        Driver
+                      </Badge>
+                    )}
+                    {hasOwnerRole && (
+                      <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-200">
+                        <Building className="w-3 h-3 mr-1" />
+                        Space Owner
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {hasBothRoles ? (
+                  <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                    <p className="text-green-800 font-medium">🎉 You have access to both dashboards!</p>
+                    <p className="text-sm text-green-600 mt-1">
+                      You can switch between Driver and Space Owner dashboards anytime from the login page.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {!hasDriverRole && (
+                      <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                            <Car className="w-5 h-5 text-purple-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">Become a Driver</p>
+                            <p className="text-sm text-gray-600">Find and book parking spaces</p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => handleAddRole('driver')}
+                          disabled={isAddingRole}
+                          className="bg-purple-600 hover:bg-purple-700"
+                        >
+                          <Plus className="w-4 h-4 mr-2" />
+                          Add Role
+                        </Button>
+                      </div>
+                    )}
+
+                    {!hasOwnerRole && (
+                      <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                            <Building className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">Become a Space Owner</p>
+                            <p className="text-sm text-gray-600">List and manage your parking spaces</p>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => handleAddRole('house_owner')}
+                          disabled={isAddingRole}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          <Plus className="w-4 h-4 mr-2" />
+                          Add Role
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Card>
           </TabsContent>
 
           {/* Notifications */}
@@ -204,7 +308,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={notifications.bookingUpdates}
-                    onCheckedChange={(value) => handleNotificationChange('bookingUpdates', value)}
+                    onCheckedChange={(value: boolean) => handleNotificationChange('bookingUpdates', value)}
                   />
                 </div>
                 <Separator />
@@ -218,7 +322,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={notifications.paymentAlerts}
-                    onCheckedChange={(value) => handleNotificationChange('paymentAlerts', value)}
+                    onCheckedChange={(value: boolean) => handleNotificationChange('paymentAlerts', value)}
                   />
                 </div>
                 <Separator />
@@ -232,7 +336,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={notifications.securityAlerts}
-                    onCheckedChange={(value) => handleNotificationChange('securityAlerts', value)}
+                    onCheckedChange={(value: boolean) => handleNotificationChange('securityAlerts', value)}
                   />
                 </div>
                 <Separator />
@@ -246,7 +350,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={notifications.promotions}
-                    onCheckedChange={(value) => handleNotificationChange('promotions', value)}
+                    onCheckedChange={(value: boolean) => handleNotificationChange('promotions', value)}
                   />
                 </div>
                 <Separator />
@@ -260,7 +364,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={notifications.locationReminders}
-                    onCheckedChange={(value) => handleNotificationChange('locationReminders', value)}
+                    onCheckedChange={(value: boolean) => handleNotificationChange('locationReminders', value)}
                   />
                 </div>
               </div>
@@ -279,7 +383,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={privacy.shareLocation}
-                    onCheckedChange={(value) => handlePrivacyChange('shareLocation', value)}
+                    onCheckedChange={(value: boolean) => handlePrivacyChange('shareLocation', value)}
                   />
                 </div>
                 <Separator />
@@ -290,7 +394,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={privacy.showProfile}
-                    onCheckedChange={(value) => handlePrivacyChange('showProfile', value)}
+                    onCheckedChange={(value: boolean) => handlePrivacyChange('showProfile', value)}
                   />
                 </div>
                 <Separator />
@@ -301,7 +405,7 @@ export function SettingsPage() {
                   </div>
                   <Switch
                     checked={privacy.dataSaving}
-                    onCheckedChange={(value) => handlePrivacyChange('dataSaving', value)}
+                    onCheckedChange={(value: boolean) => handlePrivacyChange('dataSaving', value)}
                   />
                 </div>
               </div>

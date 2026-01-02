@@ -18,11 +18,6 @@ import {
   Car,
   ArrowRight,
 } from "lucide-react";
-import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
-import { Card } from "./components/ui/card";
-import { Badge } from "./components/ui/badge";
-import { BackButton } from "./components/ui/back-button";
 import { ModernFixedHeader } from "./components/ui/modern-fixed-header";
 import { SmartSearchPage } from "./components/pages/SmartSearchPage";
 import { RealTimeAvailabilityPage } from "./components/pages/RealTimeAvailabilityPage";
@@ -52,17 +47,65 @@ import { SignupOwnerPage } from "./components/pages/SignupOwnerPage";
 import { PlatformOverviewPage } from "./components/pages/PlatformOverviewPage";
 import { HostOverviewPage } from "./components/pages/HostOverviewPage";
 import { ComprehensiveDashboardPage } from "./components/pages/ComprehensiveDashboardPage";
-import { LoadingSpinner, PageTransitionLoader } from "./components/ui/loading-spinner";
-import { StatusIndicator, ParkingAvailabilityIndicator } from "./components/ui/status-indicator";
+import { PageTransitionLoader } from "./components/ui/loading-spinner";
 import { ModernDashboardLayout } from "./components/ui/modern-dashboard-layout";
+import { useAuth } from "./contexts/AuthContext";
 
 export default function App() {
+  const { user, profile, loading: authLoading, signOut } = useAuth();
   const [currentPage, setCurrentPage] = useState("landing");
   const [userRole, setUserRole] = useState<
     "driver" | "host" | "admin"
   >("driver");
   const [isLoading, setIsLoading] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const isAuthenticated = !!user;
+
+  // Update user role based on profile when authenticated
+  useEffect(() => {
+    if (profile && profile.role) {
+      console.log('Profile changed, role:', profile.role);
+
+      // If userRole is already set to something the user HAS, don't overwrite it
+      const currentRoleMapped = userRole === 'host' ? 'house_owner' : 'driver';
+      if (profile.role.includes(currentRoleMapped as any)) {
+        return;
+      }
+
+      // Default fallback if current userRole isn't in their profile
+      if (profile.role.includes('house_owner')) {
+        console.log('Setting user role to host (fallback)');
+        setUserRole('host');
+      } else if (profile.role.includes('driver')) {
+        console.log('Setting user role to driver (fallback)');
+        setUserRole('driver');
+      }
+    }
+  }, [profile]);
+
+  // Redirect authenticated users to appropriate dashboard only on initial load
+  useEffect(() => {
+    if (isAuthenticated && !authLoading && profile) {
+      console.log('Redirect logic - profile role:', profile.role, 'current page:', currentPage);
+
+      // Only redirect if we are on landing/login/signup pages (initial entry)
+      const authPages = ["landing", "login", "signup-driver", "signup-owner", "platform-overview", "host-overview", "comprehensive-overview"];
+      if (authPages.includes(currentPage)) {
+        if (profile.role.includes('house_owner')) {
+          console.log('Redirecting to host-dashboard (initial)');
+          setCurrentPage("host-dashboard");
+          setUserRole("host");
+        } else if (profile.role.includes('driver')) {
+          console.log('Redirecting to driver dashboard (initial)');
+          setCurrentPage("find");
+          setUserRole("driver");
+        }
+      }
+    } else if (!isAuthenticated && !authLoading) {
+      console.log('Not authenticated, redirecting to landing');
+      setCurrentPage("landing");
+    }
+  }, [isAuthenticated, authLoading, profile]);
 
   // Handle role changes and redirect to appropriate dashboard
   const handleUserRoleChange = (role: "driver" | "host" | "admin") => {
@@ -81,17 +124,13 @@ export default function App() {
     }, 800);
   };
 
-  // Handle authentication
-  const handleLogin = (credentials: { email: string; password: string; rememberMe: boolean }) => {
-    // Mock login - in real app, this would call an API
-    console.log("Login credentials:", credentials);
-    setIsAuthenticated(true);
-    
-    // Set user role based on email (mock logic) and redirect appropriately
-    if (credentials.email.includes("admin")) {
+  // Handle authentication (called after successful login/signup)
+  const handleLogin = (credentials: { email: string; password: string; rememberMe: boolean; userRole?: 'driver' | 'host' | 'admin' }) => {
+    // User is already authenticated via AuthContext, just redirect based on role
+    if (credentials.userRole === "admin") {
       setUserRole("admin");
       setCurrentPage("admin");
-    } else if (credentials.email.includes("owner") || credentials.email.includes("host")) {
+    } else if (credentials.userRole === "host") {
       setUserRole("host");
       setCurrentPage("host-dashboard");
     } else {
@@ -101,11 +140,7 @@ export default function App() {
   };
 
   const handleSignup = (userData: any) => {
-    // Mock signup - in real app, this would call an API
-    console.log("Signup data:", userData);
-    setIsAuthenticated(true);
-    
-    // Set user role and redirect to appropriate dashboard based on signup type
+    // User is already authenticated via AuthContext, just redirect based on role
     if (userData.userType === "owner") {
       setUserRole("host");
       setCurrentPage("host-dashboard");
@@ -123,10 +158,62 @@ export default function App() {
     setCurrentPage(`${type}-overview`);
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setCurrentPage("landing");
+  const handleLogout = async () => {
+    try {
+      console.log("Processing logout...");
+      await signOut();
+    } catch (error) {
+      console.error("Logout error (non-fatal):", error);
+    } finally {
+      // Always redirect to landing page
+      window.scrollTo(0, 0);
+      setCurrentPage("landing");
+      setUserRole("driver");
+      console.log("Redirecting to landing page");
+    }
   };
+
+  // Show loading while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <PageTransitionLoader />
+      </div>
+    );
+  }
+
+  // Show error if Supabase is not configured
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Configuration Required</h1>
+          <p className="text-gray-700 mb-4">
+            Supabase environment variables are not set. Please create a <code className="bg-gray-100 px-2 py-1 rounded">.env</code> file in the Frontend directory.
+          </p>
+          <div className="bg-gray-100 p-4 rounded mb-4">
+            <p className="text-sm font-mono text-gray-800 mb-2">Add these to your .env file:</p>
+            <pre className="text-xs text-gray-700 whitespace-pre-wrap">
+              {`VITE_SUPABASE_URL=https://tuogbwilzwsoizxlgfhq.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
+            </pre>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            See <code className="bg-gray-100 px-2 py-1 rounded">ENV_CONFIGURATION.md</code> for full details.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
+          >
+            Reload After Configuration
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Authentication pages check
   if (!isAuthenticated) {
@@ -250,8 +337,8 @@ export default function App() {
   // Render the main dashboard based on user role
   const renderDashboard = () => {
     return (
-      <ModernDashboardLayout 
-        userRole={userRole} 
+      <ModernDashboardLayout
+        userRole={userRole}
         onNavigate={handleSpecialPageNavigation}
       />
     );
@@ -271,9 +358,9 @@ export default function App() {
         currentPage={currentPage}
         onNavigate={setCurrentPage}
         onSpecialNavigation={handleSpecialPageNavigation}
-        onLogout={handleLogout} className="mx-[26px] my-[0px] text-[12px]"
+        onLogout={handleLogout}
       />
-      
+
       {/* Main Content */}
       <main className="min-h-screen">
         {renderPageContent()}
