@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "../../lib/supabase";
 import {
   Search,
   MapPin,
@@ -6,7 +7,6 @@ import {
   Star,
   Navigation,
   Clock,
-  DollarSign,
   Car,
   Truck,
   Bike,
@@ -33,52 +33,51 @@ export function SmartSearchPage() {
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState("distance");
 
-  const parkingResults = [
-    {
-      id: 1,
-      name: "Central Plaza Garage",
-      address: "123 Main St, Downtown",
-      distance: 0.2,
-      price: 2.5,
-      rating: 4.8,
-      reviews: 324,
-      available: 12,
-      total: 50,
-      type: "Garage",
-      amenities: ["covered", "security", "ev-charging", "disabled-access"],
-      image: "/api/placeholder/300/200",
-    },
-    {
-      id: 2,
-      name: "Business District Parking",
-      address: "456 Corporate Ave",
-      distance: 0.4,
-      price: 3.0,
-      rating: 4.6,
-      reviews: 186,
-      available: 8,
-      total: 25,
-      type: "Open Lot",
-      amenities: ["security", "wifi"],
-      image: "/api/placeholder/300/200",
-    },
-    {
-      id: 3,
-      name: "Mall Parking Complex",
-      address: "789 Shopping Blvd",
-      distance: 0.6,
-      price: 1.5,
-      rating: 4.4,
-      reviews: 512,
-      available: 25,
-      total: 100,
-      type: "Multi-level",
-      amenities: ["covered", "security", "cctv", "disabled-access"],
-      image: "/api/placeholder/300/200",
-    },
-  ];
+  const [spots, setSpots] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const amenityIcons = {
+  useEffect(() => {
+    fetchSpots();
+  }, []);
+
+  const fetchSpots = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('parking_spaces')
+        .select('*')
+        .eq('availability_status', 'available');
+
+      if (error) throw error;
+      setSpots(data || []);
+    } catch (error) {
+      console.error('Error fetching spots:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredSpots = spots.filter(spot => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return spot.name.toLowerCase().includes(q) || spot.address.toLowerCase().includes(q);
+  });
+
+  const parkingResults = filteredSpots.map(spot => ({
+    id: spot.id,
+    name: spot.name,
+    address: spot.address,
+    distance: 0.5,
+    price: spot.hourly_rate || 0,
+    rating: 4.8,
+    reviews: 12,
+    available: spot.total_spots || 1,
+    total: spot.total_spots || 1,
+    type: spot.space_type || "Standard",
+    amenities: spot.amenities || [],
+    image: spot.photos && spot.photos.length > 0 ? spot.photos[0] : "/api/placeholder/300/200",
+  }));
+
+  const amenityIcons: Record<string, any> = {
     covered: Shield,
     security: Shield,
     "ev-charging": Zap,
@@ -87,7 +86,7 @@ export function SmartSearchPage() {
     "disabled-access": Accessibility,
   };
 
-  const amenityLabels = {
+  const amenityLabels: Record<string, string> = {
     covered: "Covered Parking",
     security: "24/7 Security",
     "ev-charging": "EV Charging",
@@ -118,6 +117,10 @@ export function SmartSearchPage() {
     return "Nearly Full";
   };
 
+  if (loading) {
+    return <div className="p-8 text-center">Loading parking spots...</div>;
+  }
+
   return (
     <div className="space-y-6">
       {/* Search Header */}
@@ -128,7 +131,7 @@ export function SmartSearchPage() {
           <p className="text-purple-100 mb-6">
             Find the perfect parking spot with AI-powered recommendations
           </p>
-          
+
           {/* Main Search Bar */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
             <div className="lg:col-span-3">
@@ -315,7 +318,12 @@ export function SmartSearchPage() {
                     {/* Image */}
                     <div className="lg:col-span-1">
                       <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gray-300"></div>
+                        <img
+                          src={spot.image}
+                          alt={spot.name}
+                          className="w-full h-full object-cover"
+                          onError={(e: any) => (e.currentTarget.src = 'https://via.placeholder.com/300x200?text=No+Preview')}
+                        />
                         <div className="absolute top-2 left-2">
                           <Badge variant="secondary" className="bg-white/90">
                             {spot.type}
@@ -363,8 +371,9 @@ export function SmartSearchPage() {
 
                           {/* Amenities */}
                           <div className="flex flex-wrap gap-2">
-                            {spot.amenities.map((amenity) => {
+                            {spot.amenities.map((amenity: string) => {
                               const IconComponent = amenityIcons[amenity];
+                              if (!IconComponent) return null;
                               return (
                                 <div
                                   key={amenity}

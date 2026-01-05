@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
 import { MapPin, Navigation, Filter, Search, Target, Layers, Star, Clock, ArrowRight } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -5,13 +7,42 @@ import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 
 export function MapPage() {
-  const nearbySpots = [
-    { id: 1, name: "Central Plaza", distance: "0.2 mi", price: "$2.50/hr", available: 12, type: "Garage", rating: 4.8 },
-    { id: 2, name: "Downtown Parking", distance: "0.4 mi", price: "$3.00/hr", available: 8, type: "Open Lot", rating: 4.6 },
-    { id: 3, name: "Mall Parking", distance: "0.6 mi", price: "$1.50/hr", available: 25, type: "Covered", rating: 4.5 },
-    { id: 4, name: "Business District", distance: "0.8 mi", price: "$4.00/hr", available: 5, type: "Valet", rating: 4.9 },
-    { id: 5, name: "Sports Arena", distance: "1.2 mi", price: "$2.00/hr", available: 45, type: "Stadium", rating: 4.3 },
-  ];
+  const [spots, setSpots] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchSpots();
+  }, []);
+
+  const fetchSpots = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('parking_spaces')
+        .select('*')
+        .eq('availability_status', 'available');
+
+      if (error) throw error;
+      setSpots(data || []);
+    } catch (error) {
+      console.error('Error fetching spots:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const nearbySpots = spots.map(spot => ({
+    id: spot.id,
+    name: spot.name,
+    distance: "0.5 mi",
+    price: spot.hourly_rate ? `$${spot.hourly_rate}/hr` : "$0.00/hr",
+    available: spot.total_spots || 1,
+    type: spot.space_type || "Standard",
+    rating: 4.8
+  }));
+
+  if (loading) {
+    return <div className="min-h-[500px] flex items-center justify-center">Loading map...</div>;
+  }
 
   return (
     <div className="space-y-8">
@@ -25,7 +56,7 @@ export function MapPage() {
 
       {/* Enhanced Desktop Layout: Map + Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 h-[700px]">
-        
+
         {/* Enhanced Left Sidebar - Search and Filters */}
         <div className="lg:col-span-1 space-y-6 overflow-y-auto h-full animate-slide-in-left">
           {/* Enhanced Search Section */}
@@ -44,7 +75,7 @@ export function MapPage() {
                   className="pl-12 bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 h-12"
                 />
               </div>
-              
+
               <div className="grid grid-cols-1 gap-3">
                 <Button variant="outline" className="flex items-center gap-3 justify-center h-12 border-2 border-purple-200 hover:border-purple-400 hover:bg-purple-50">
                   <Filter className="w-5 h-5 text-purple-600" />
@@ -127,7 +158,7 @@ export function MapPage() {
                   </div>
                 </div>
               </div>
-              
+
               {/* Enhanced Map Markers with improved tooltips */}
               <div className="absolute top-12 left-12">
                 <div className="relative group">
@@ -161,7 +192,7 @@ export function MapPage() {
                   </div>
                 </div>
               </div>
-              
+
               {/* Enhanced Current Location Button */}
               <div className="absolute bottom-8 right-8">
                 <Button size="lg" className="bg-white text-purple-600 hover:bg-gray-50 professional-shadow-lg hover-lift rounded-2xl">
@@ -205,7 +236,7 @@ export function MapPage() {
             <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         </div>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
           {nearbySpots.map((spot, index) => (
             <Card key={spot.id} className={`glass-card professional-shadow hover:professional-shadow-xl transition-all duration-300 hover-lift border-0 animate-fade-in stagger-${(index % 3) + 1}`}>
@@ -234,7 +265,7 @@ export function MapPage() {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                   <div>
                     <div className="text-2xl font-bold text-purple-600 mb-1">{spot.price}</div>

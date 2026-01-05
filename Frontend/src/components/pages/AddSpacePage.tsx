@@ -1,4 +1,4 @@
-import { MapPin, Camera, Upload, Car, Shield, Zap, Clock, Plus, X, ImagePlus, DollarSign } from 'lucide-react';
+import { MapPin, Car, Shield, Zap, Plus, X, ImagePlus, DollarSign, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Input } from '../ui/input';
@@ -6,10 +6,30 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
-import { Badge } from '../ui/badge';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 
-export function AddSpacePage() {
+interface AddSpacePageProps {
+  onNavigate?: (page: string) => void;
+}
+
+export function AddSpacePage({ onNavigate }: AddSpacePageProps) {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Form State
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [spaceType, setSpaceType] = useState('');
+  const [totalSpots, setTotalSpots] = useState('');
+  const [description, setDescription] = useState('');
+  const [hourlyRate, setHourlyRate] = useState('');
+  const [dailyRate, setDailyRate] = useState('');
+
   const [photos, setPhotos] = useState<string[]>([]);
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [vehicleTypes, setVehicleTypes] = useState<string[]>(['car']);
@@ -32,7 +52,7 @@ export function AddSpacePage() {
   ];
 
   const toggleAmenity = (amenityId: string) => {
-    setSelectedAmenities(prev => 
+    setSelectedAmenities(prev =>
       prev.includes(amenityId)
         ? prev.filter(id => id !== amenityId)
         : [...prev, amenityId]
@@ -40,11 +60,101 @@ export function AddSpacePage() {
   };
 
   const toggleVehicleType = (typeId: string) => {
-    setVehicleTypes(prev => 
+    setVehicleTypes(prev =>
       prev.includes(typeId)
         ? prev.filter(id => id !== typeId)
         : [...prev, typeId]
     );
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files || event.target.files.length === 0 || !user) {
+      return;
+    }
+
+    const file = event.target.files[0];
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+    const filePath = `${user.id}/${fileName}`;
+
+    setUploading(true);
+    const loadingToast = toast.loading('Uploading photo...');
+
+    try {
+      const { error: uploadError } = await supabase.storage
+        .from('space-photos')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data } = supabase.storage
+        .from('space-photos')
+        .getPublicUrl(filePath);
+
+      setPhotos([...photos, data.publicUrl]);
+      toast.success('Photo uploaded successfully');
+    } catch (error: any) {
+      console.error('Error uploading photo:', error);
+      toast.error('Error uploading photo: ' + error.message);
+    } finally {
+      setUploading(false);
+      toast.dismiss(loadingToast);
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!user) {
+      toast.error('You must be logged in to list a space');
+      return;
+    }
+
+    if (!name || !address || !hourlyRate) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { error } = await supabase
+        .from('parking_spaces')
+        .insert([
+          {
+            owner_id: user.id,
+            name,
+            address,
+            space_type: spaceType,
+            total_spots: parseInt(totalSpots) || 1,
+            description,
+            hourly_rate: parseFloat(hourlyRate),
+            daily_rate: parseFloat(dailyRate) || null,
+            photos,
+            amenities: selectedAmenities,
+            vehicle_types: vehicleTypes,
+            availability_status: 'available'
+          }
+        ])
+        .select();
+
+      if (error) throw error;
+
+      toast.success('Parking space published successfully!');
+
+      if (onNavigate) {
+        onNavigate('host-dashboard');
+      }
+    } catch (error: any) {
+      console.error('Error publishing space:', error);
+      toast.error(error.message || 'Failed to publish space');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -67,16 +177,28 @@ export function AddSpacePage() {
             <h3 className="text-xl font-semibold text-gray-900 mb-2">Space Photos</h3>
             <p className="text-gray-600">Add high-quality photos to attract more bookings</p>
           </div>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+            accept="image/*"
+          />
+
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {photos.map((photo, index) => (
-              <div key={index} className="relative aspect-square bg-gray-100 rounded-xl overflow-hidden hover-lift professional-shadow">
-                <div className="absolute inset-0 bg-gradient-to-br from-purple-200 to-blue-200 flex items-center justify-center">
-                  <Camera className="w-8 h-8 text-purple-600" />
-                </div>
-                <Button 
-                  size="icon" 
-                  variant="destructive" 
-                  className="absolute top-3 right-3 h-8 w-8 rounded-full professional-shadow"
+              <div key={index} className="relative aspect-square bg-gray-100 rounded-xl overflow-hidden hover-lift professional-shadow group">
+                <img
+                  src={photo}
+                  alt={`Space photo ${index + 1}`}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Button
+                  size="icon"
+                  variant="destructive"
+                  className="absolute top-3 right-3 h-8 w-8 rounded-full professional-shadow opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={() => setPhotos(photos.filter((_, i) => i !== index))}
                 >
                   <X className="w-4 h-4" />
@@ -84,13 +206,18 @@ export function AddSpacePage() {
               </div>
             ))}
             {photos.length < 6 && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="aspect-square border-dashed border-2 border-purple-300 bg-purple-50 hover:bg-purple-100 hover:border-purple-400 rounded-xl transition-all duration-300"
-                onClick={() => setPhotos([...photos, `photo-${photos.length + 1}`])}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
               >
                 <div className="text-center">
-                  <Plus className="w-8 h-8 text-purple-600 mx-auto mb-2" />
+                  {uploading ? (
+                    <Loader2 className="w-8 h-8 text-purple-600 animate-spin mx-auto mb-2" />
+                  ) : (
+                    <Plus className="w-8 h-8 text-purple-600 mx-auto mb-2" />
+                  )}
                   <span className="text-sm font-medium text-purple-600">Add Photo</span>
                 </div>
               </Button>
@@ -113,21 +240,25 @@ export function AddSpacePage() {
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Basic Details</h3>
               <p className="text-gray-600">Essential information about your parking space</p>
             </div>
-            
+
             <div className="space-y-6">
               <div>
                 <Label htmlFor="spaceName" className="text-base font-medium text-gray-900 mb-2 block">Space Name</Label>
-                <Input 
-                  id="spaceName" 
+                <Input
+                  id="spaceName"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   placeholder="e.g., Downtown Garage A"
                   className="bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 h-12"
                 />
               </div>
-              
+
               <div>
                 <Label htmlFor="address" className="text-base font-medium text-gray-900 mb-2 block">Full Address</Label>
-                <Input 
-                  id="address" 
+                <Input
+                  id="address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
                   placeholder="Full address of parking space"
                   className="bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 h-12"
                 />
@@ -136,7 +267,7 @@ export function AddSpacePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="spaceType" className="text-base font-medium text-gray-900 mb-2 block">Space Type</Label>
-                  <Select>
+                  <Select onValueChange={setSpaceType} value={spaceType}>
                     <SelectTrigger className="bg-white border-gray-300 focus:border-purple-500 h-12">
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
@@ -149,12 +280,14 @@ export function AddSpacePage() {
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <div>
                   <Label htmlFor="totalSpots" className="text-base font-medium text-gray-900 mb-2 block">Number of Spots</Label>
-                  <Input 
-                    id="totalSpots" 
+                  <Input
+                    id="totalSpots"
                     type="number"
+                    value={totalSpots}
+                    onChange={(e) => setTotalSpots(e.target.value)}
                     placeholder="Number of spots"
                     className="bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 h-12"
                   />
@@ -163,8 +296,10 @@ export function AddSpacePage() {
 
               <div>
                 <Label htmlFor="description" className="text-base font-medium text-gray-900 mb-2 block">Description</Label>
-                <Textarea 
-                  id="description" 
+                <Textarea
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
                   placeholder="Describe your parking space, access instructions, etc."
                   className="bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 min-h-[120px]"
                   rows={4}
@@ -184,31 +319,35 @@ export function AddSpacePage() {
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Pricing</h3>
               <p className="text-gray-600">Set competitive rates for your space</p>
             </div>
-            
+
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="hourlyRate" className="text-base font-medium text-gray-900 mb-2 block">Hourly Rate</Label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">$</span>
-                    <Input 
-                      id="hourlyRate" 
+                    <Input
+                      id="hourlyRate"
                       type="number"
                       step="0.25"
+                      value={hourlyRate}
+                      onChange={(e) => setHourlyRate(e.target.value)}
                       placeholder="2.50"
                       className="pl-12 bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 h-12"
                     />
                   </div>
                 </div>
-                
+
                 <div>
                   <Label htmlFor="dailyRate" className="text-base font-medium text-gray-900 mb-2 block">Daily Rate</Label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-500 font-medium">$</span>
-                    <Input 
-                      id="dailyRate" 
+                    <Input
+                      id="dailyRate"
                       type="number"
                       step="1"
+                      value={dailyRate}
+                      onChange={(e) => setDailyRate(e.target.value)}
                       placeholder="15.00"
                       className="pl-12 bg-white border-gray-300 focus:border-purple-500 focus:ring-purple-500 h-12"
                     />
@@ -227,7 +366,7 @@ export function AddSpacePage() {
                     </div>
                     <Switch />
                   </div>
-                  
+
                   <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                     <div>
                       <Label className="font-medium text-gray-900">Instant Booking</Label>
@@ -267,18 +406,16 @@ export function AddSpacePage() {
                 <Button
                   key={type.id}
                   variant={vehicleTypes.includes(type.id) ? 'default' : 'outline'}
-                  className={`flex items-center gap-4 justify-start h-auto p-4 rounded-xl transition-all duration-300 ${
-                    vehicleTypes.includes(type.id) 
-                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover-lift' 
-                      : 'border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
-                  }`}
+                  className={`flex items-center gap-4 justify-start h-auto p-4 rounded-xl transition-all duration-300 ${vehicleTypes.includes(type.id)
+                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover-lift'
+                    : 'border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                    }`}
                   onClick={() => toggleVehicleType(type.id)}
                 >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    vehicleTypes.includes(type.id) 
-                      ? 'bg-white/20' 
-                      : 'bg-gradient-to-br from-purple-100 to-blue-100'
-                  }`}>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${vehicleTypes.includes(type.id)
+                    ? 'bg-white/20'
+                    : 'bg-gradient-to-br from-purple-100 to-blue-100'
+                    }`}>
                     <Car className={`w-5 h-5 ${vehicleTypes.includes(type.id) ? 'text-white' : 'text-purple-600'}`} />
                   </div>
                   <span className={`font-medium ${vehicleTypes.includes(type.id) ? 'text-white' : 'text-gray-900'}`}>
@@ -305,18 +442,16 @@ export function AddSpacePage() {
                 <Button
                   key={amenity.id}
                   variant={selectedAmenities.includes(amenity.id) ? 'default' : 'outline'}
-                  className={`flex items-center gap-4 justify-start h-auto p-4 rounded-xl transition-all duration-300 ${
-                    selectedAmenities.includes(amenity.id) 
-                      ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover-lift' 
-                      : 'border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
-                  }`}
+                  className={`flex items-center gap-4 justify-start h-auto p-4 rounded-xl transition-all duration-300 ${selectedAmenities.includes(amenity.id)
+                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover-lift'
+                    : 'border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                    }`}
                   onClick={() => toggleAmenity(amenity.id)}
                 >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    selectedAmenities.includes(amenity.id) 
-                      ? 'bg-white/20' 
-                      : 'bg-gradient-to-br from-purple-100 to-blue-100'
-                  }`}>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${selectedAmenities.includes(amenity.id)
+                    ? 'bg-white/20'
+                    : 'bg-gradient-to-br from-purple-100 to-blue-100'
+                    }`}>
                     <amenity.icon className={`w-5 h-5 ${selectedAmenities.includes(amenity.id) ? 'text-white' : 'text-purple-600'}`} />
                   </div>
                   <span className={`font-medium ${selectedAmenities.includes(amenity.id) ? 'text-white' : 'text-gray-900'}`}>
@@ -337,20 +472,30 @@ export function AddSpacePage() {
             <p className="text-gray-600">Review your listing details and publish when ready</p>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="flex-1 h-12 border-2 border-gray-300 hover:border-gray-400 font-medium"
+              onClick={() => onNavigate?.('host-dashboard')}
             >
-              Save Draft
+              Cancel
             </Button>
-            <Button 
+            <Button
               className="flex-1 h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 font-medium professional-shadow hover-lift"
+              onClick={handlePublish}
+              disabled={loading || uploading}
             >
-              Publish Space
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Publishing...
+                </>
+              ) : (
+                'Publish Space'
+              )}
             </Button>
           </div>
           <p className="text-sm text-gray-500">
-            Your listing will be reviewed by our team before going live
+            Your listing will be live immediately after publishing
           </p>
         </div>
       </Card>

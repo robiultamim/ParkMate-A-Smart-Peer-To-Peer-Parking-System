@@ -15,6 +15,8 @@ import {
   Car,
   Building,
   Plus,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -28,6 +30,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { useAuth } from "../../contexts/AuthContext";
 import { addRoleToProfile } from "../../lib/addRole";
 import { toast } from "sonner";
+import { supabase } from "../../lib/supabase";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 
 export function SettingsPage() {
   const { profile, refreshProfile } = useAuth();
@@ -46,6 +59,8 @@ export function SettingsPage() {
     dataSaving: false,
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleNotificationChange = (key: string, value: boolean) => {
     setNotifications(prev => ({ ...prev, [key]: value }));
@@ -69,6 +84,50 @@ export function SettingsPage() {
       toast.error(error.message || 'An error occurred');
     } finally {
       setIsAddingRole(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        toast.error('No user session found');
+        return;
+      }
+
+      console.log('Deleting user account:', user.id);
+
+      // Delete the user from Supabase Auth
+      // This will automatically cascade delete from user_profiles due to ON DELETE CASCADE
+      const { error } = await supabase.rpc('delete_user');
+
+      if (error) {
+        console.error('Delete error:', error);
+        toast.error('Failed to delete account. Please contact support.');
+        return;
+      }
+
+      toast.success('Account deleted successfully. Redirecting...');
+
+      // Sign out and redirect
+      await supabase.auth.signOut();
+
+      // Clear local storage
+      localStorage.removeItem('activeUserRole');
+
+      // Redirect to landing page
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 1500);
+
+    } catch (error: any) {
+      console.error('Delete account error:', error);
+      toast.error(error.message || 'Failed to delete account');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteDialog(false);
     }
   };
 
@@ -421,12 +480,19 @@ export function SettingsPage() {
                   </div>
                   <Button variant="outline">Download</Button>
                 </div>
-                <div className="flex items-center justify-between p-4 bg-red-50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-200">
                   <div>
                     <p className="font-medium text-red-900">Delete Account</p>
-                    <p className="text-sm text-red-600">Permanently delete your account and data</p>
+                    <p className="text-sm text-red-600">Permanently delete your account and all data</p>
                   </div>
-                  <Button variant="destructive">Delete</Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setShowDeleteDialog(true)}
+                    disabled={isDeleting}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -536,6 +602,49 @@ export function SettingsPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Delete Account Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-red-600" />
+              </div>
+              <AlertDialogTitle className="text-xl">Delete Account?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-base">
+              This action <span className="font-semibold text-red-600">cannot be undone</span>. This will permanently delete your account and remove all your data from our servers, including:
+              <ul className="list-disc list-inside mt-3 space-y-1 text-gray-700">
+                <li>Your profile and account information</li>
+                <li>All parking spaces you've listed</li>
+                <li>Booking history and transactions</li>
+                <li>Saved preferences and settings</li>
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAccount}
+              disabled={isDeleting}
+              className="!bg-red-600 hover:!bg-red-700 !text-white"
+            >
+              {isDeleting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Yes, Delete My Account
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -49,15 +49,23 @@ import { HostOverviewPage } from "./components/pages/HostOverviewPage";
 import { ComprehensiveDashboardPage } from "./components/pages/ComprehensiveDashboardPage";
 import { PageTransitionLoader } from "./components/ui/loading-spinner";
 import { ModernDashboardLayout } from "./components/ui/modern-dashboard-layout";
+import { ModernDriverDashboard } from "./components/pages/ModernDriverDashboard";
 import { useAuth } from "./contexts/AuthContext";
 
 export default function App() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
   const [currentPage, setCurrentPage] = useState("landing");
-  const [userRole, setUserRole] = useState<
-    "driver" | "host" | "admin"
-  >("driver");
+  const [userRole, setUserRole] = useState<"driver" | "host" | "admin">(() => {
+    // Restore role from localStorage on initial load
+    const savedRole = localStorage.getItem('activeUserRole');
+    return (savedRole as "driver" | "host" | "admin") || "driver";
+  });
   const [isLoading, setIsLoading] = useState(false);
+
+  // Save userRole to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('activeUserRole', userRole);
+  }, [userRole]);
 
   const isAuthenticated = !!user;
 
@@ -66,19 +74,24 @@ export default function App() {
     if (profile && profile.role) {
       console.log('Profile changed, role:', profile.role);
 
-      // If userRole is already set to something the user HAS, don't overwrite it
-      const currentRoleMapped = userRole === 'host' ? 'house_owner' : 'driver';
-      if (profile.role.includes(currentRoleMapped as any)) {
+      // Get saved role preference from localStorage
+      const savedRole = localStorage.getItem('activeUserRole');
+      const savedRoleMapped = savedRole === 'host' ? 'house_owner' : savedRole === 'driver' ? 'driver' : null;
+
+      // If user has the saved role, use it
+      if (savedRoleMapped && profile.role.includes(savedRoleMapped as any)) {
+        console.log('Using saved role preference:', savedRole);
+        setUserRole(savedRole as "driver" | "host" | "admin");
         return;
       }
 
-      // Default fallback if current userRole isn't in their profile
-      if (profile.role.includes('house_owner')) {
-        console.log('Setting user role to host (fallback)');
-        setUserRole('host');
-      } else if (profile.role.includes('driver')) {
-        console.log('Setting user role to driver (fallback)');
+      // Otherwise, default to first available role
+      if (profile.role.includes('driver')) {
+        console.log('Setting user role to driver (default)');
         setUserRole('driver');
+      } else if (profile.role.includes('house_owner')) {
+        console.log('Setting user role to host (default)');
+        setUserRole('host');
       }
     }
   }, [profile]);
@@ -86,19 +99,27 @@ export default function App() {
   // Redirect authenticated users to appropriate dashboard only on initial load
   useEffect(() => {
     if (isAuthenticated && !authLoading && profile) {
-      console.log('Redirect logic - profile role:', profile.role, 'current page:', currentPage);
+      console.log('Redirect logic - profile role:', profile.role, 'current page:', currentPage, 'active role:', userRole);
 
       // Only redirect if we are on landing/login/signup pages (initial entry)
       const authPages = ["landing", "login", "signup-driver", "signup-owner", "platform-overview", "host-overview", "comprehensive-overview"];
       if (authPages.includes(currentPage)) {
-        if (profile.role.includes('house_owner')) {
-          console.log('Redirecting to host-dashboard (initial)');
+        // Redirect based on active role (which was restored from localStorage)
+        if (userRole === 'host' && profile.role.includes('house_owner')) {
+          console.log('Redirecting to host-dashboard (saved preference)');
           setCurrentPage("host-dashboard");
-          setUserRole("host");
+        } else if (userRole === 'driver' && profile.role.includes('driver')) {
+          console.log('Redirecting to driver dashboard (saved preference)');
+          setCurrentPage("find");
         } else if (profile.role.includes('driver')) {
-          console.log('Redirecting to driver dashboard (initial)');
+          // Fallback to driver if saved role doesn't match
+          console.log('Redirecting to driver dashboard (fallback)');
           setCurrentPage("find");
           setUserRole("driver");
+        } else if (profile.role.includes('house_owner')) {
+          console.log('Redirecting to host-dashboard (fallback)');
+          setCurrentPage("host-dashboard");
+          setUserRole("host");
         }
       }
     } else if (!isAuthenticated && !authLoading) {
@@ -287,6 +308,8 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
   // Render page content based on currentPage
   const renderPageContent = () => {
     switch (currentPage) {
+      case "find":
+        return <ModernDriverDashboard onNavigate={handleSpecialPageNavigation} />;
       case "profile":
         return <ProfilePage userRole={userRole} />;
       case "map":
@@ -306,7 +329,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
       case "host-dashboard":
         return <SpaceOwnerDashboard onNavigate={handleSpecialPageNavigation} />;
       case "add-space":
-        return <AddSpacePage />;
+        return <AddSpacePage onNavigate={handleSpecialPageNavigation} />;
       case "earnings":
         return <EarningsPage onNavigate={handleSpecialPageNavigation} />;
       case "bookings-manage":
