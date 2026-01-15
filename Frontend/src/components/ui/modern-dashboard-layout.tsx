@@ -36,7 +36,10 @@ import { Card } from "./card";
 import { Badge } from "./badge";
 import { Input } from "./input";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
+import { useAuth } from "../../contexts/AuthContext";
 import { ParkMateLogo } from "./parkmate-logo";
+
+// ... existing imports
 
 interface DashboardLayoutProps {
   userRole: "driver" | "host" | "admin";
@@ -45,6 +48,8 @@ interface DashboardLayoutProps {
 }
 
 export function ModernDashboardLayout({ userRole, onNavigate, children }: DashboardLayoutProps) {
+  const { profile, user } = useAuth(); // Get real user data
+
   const getRoleTheme = (role: string) => {
     switch (role) {
       case "driver":
@@ -75,35 +80,50 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
   };
 
   const getUserInfo = () => {
+    // Fallback logic
+    const fallbackName = user?.email?.split('@')[0] || (userRole === 'host' ? 'Host' : 'Driver');
+    const displayName = profile?.first_name ? profile.first_name : fallbackName;
+    const displayFullName = profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : fallbackName;
+
+    // Default Object structure to ensure we always return something matching the shape
+    const defaultStats = {
+      name: displayFullName,
+      greeting: `Welcome back!`,
+      subtitle: "",
+      tagline: "",
+      primaryColor: "blue",
+      stats: [] as any[]
+    };
+
     switch (userRole) {
       case "driver":
         return {
-          name: "John Driver",
-          greeting: "Welcome back, John!",
+          name: displayFullName || "John Driver",
+          greeting: `Welcome back, ${displayName}!`,
           subtitle: "Find your perfect parking spot",
           tagline: "Your parking companion for stress-free journeys",
           primaryColor: "blue",
           stats: [
-            { 
-              label: "Total Bookings", 
-              value: "45", 
-              change: "+5 this month", 
+            {
+              label: "Total Bookings",
+              value: "45",
+              change: "+5 this month",
               color: "blue",
               icon: <Car className="w-5 h-5" />,
               trend: "up"
             },
-            { 
-              label: "Money Saved", 
-              value: "$267", 
-              change: "+12% vs last month", 
+            {
+              label: "Money Saved",
+              value: "$267",
+              change: "+12% vs last month",
               color: "green",
               icon: <Wallet className="w-5 h-5" />,
               trend: "up"
             },
-            { 
-              label: "Favorite Spots", 
-              value: "8", 
-              change: "2 new favorites", 
+            {
+              label: "Favorite Spots",
+              value: "8",
+              change: "2 new favorites",
               color: "purple",
               icon: <Heart className="w-5 h-5" />,
               trend: "up"
@@ -112,32 +132,32 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
         };
       case "host":
         return {
-          name: "Sarah Host",
-          greeting: "Welcome back, Sarah!",
+          name: displayFullName || "Sarah Host",
+          greeting: `Welcome back, ${displayName}!`,
           subtitle: "Manage your parking spaces",
           tagline: "Transform your space into steady income",
           primaryColor: "green",
           stats: [
-            { 
-              label: "Monthly Earnings", 
-              value: "$2,847", 
-              change: "+23% this month", 
+            {
+              label: "Monthly Earnings",
+              value: "$2,847",
+              change: "+23% this month",
               color: "green",
               icon: <DollarSign className="w-5 h-5" />,
               trend: "up"
             },
-            { 
-              label: "Active Spaces", 
-              value: "3", 
-              change: "All verified", 
+            {
+              label: "Active Spaces",
+              value: "3",
+              change: "All verified",
               color: "blue",
               icon: <Building className="w-5 h-5" />,
               trend: "neutral"
             },
-            { 
-              label: "Booking Rate", 
-              value: "89%", 
-              change: "+5% improvement", 
+            {
+              label: "Booking Rate",
+              value: "89%",
+              change: "+5% improvement",
               color: "purple",
               icon: <TrendingUp className="w-5 h-5" />,
               trend: "up"
@@ -146,38 +166,40 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
         };
       case "admin":
         return {
-          name: "Admin User",
-          greeting: "Welcome back, Admin!",
+          name: displayFullName || "Admin User",
+          greeting: `Welcome back, ${displayName}!`,
           subtitle: "Platform overview and management",
           tagline: "Overseeing the future of smart parking",
           primaryColor: "purple",
           stats: [
-            { 
-              label: "Total Users", 
-              value: "18,542", 
-              change: "+347 this week", 
+            {
+              label: "Total Users",
+              value: "18,542",
+              change: "+347 this week",
               color: "blue",
               icon: <Users className="w-5 h-5" />,
               trend: "up"
             },
-            { 
-              label: "Daily Revenue", 
-              value: "$15,234", 
-              change: "+8.2% vs yesterday", 
+            {
+              label: "Daily Revenue",
+              value: "$15,234",
+              change: "+8.2% vs yesterday",
               color: "green",
               icon: <BarChart3 className="w-5 h-5" />,
               trend: "up"
             },
-            { 
-              label: "Active Issues", 
-              value: "3", 
-              change: "2 resolved today", 
+            {
+              label: "Active Issues",
+              value: "3",
+              change: "2 resolved today",
               color: "orange",
               icon: <AlertCircle className="w-5 h-5" />,
               trend: "down"
             },
           ],
         };
+      default:
+        return defaultStats;
     }
   };
 
@@ -415,11 +437,10 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
                     <div className={`p-3 rounded-xl ${theme.accent} bg-opacity-10`}>
                       {stat.icon}
                     </div>
-                    <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      stat.trend === 'up' ? 'bg-green-100 text-green-800' : 
-                      stat.trend === 'down' ? 'bg-red-100 text-red-800' : 
-                      'bg-blue-100 text-blue-800'
-                    }`}>
+                    <div className={`px-2 py-1 rounded-full text-xs font-medium ${stat.trend === 'up' ? 'bg-green-100 text-green-800' :
+                      stat.trend === 'down' ? 'bg-red-100 text-red-800' :
+                        'bg-blue-100 text-blue-800'
+                      }`}>
                       {stat.trend === 'up' ? '↗' : stat.trend === 'down' ? '↘' : '→'} {stat.change.split(' ')[0]}
                     </div>
                   </div>
@@ -491,7 +512,7 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
               <h2 className="text-3xl font-bold text-gray-900 mb-2">Quick Actions</h2>
               <p className="text-gray-600 text-lg">Access your most used features with one click</p>
             </div>
-            
+
             {/* Primary Actions */}
             <div className="space-y-6">
               <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
@@ -562,8 +583,8 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
                 <h2 className="text-3xl font-bold text-gray-900">Recent Activity</h2>
                 <p className="text-gray-600">Stay updated with your latest actions</p>
               </div>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className={`text-${userInfo.primaryColor}-600 hover:bg-${userInfo.primaryColor}-50 border-2 font-semibold px-6 py-2 rounded-xl hover:scale-105 transition-all duration-300`}
               >
                 View All
@@ -589,22 +610,21 @@ export function ModernDashboardLayout({ userRole, onNavigate, children }: Dashbo
                     { icon: <Users className="w-5 h-5" />, title: "System report generated", desc: "Weekly analytics report", time: "3 hours ago", color: "blue" }
                   ]
                 };
-                
+
                 const activity = activities[userRole][index];
-                
+
                 return (
                   <div
                     key={index}
                     className="group p-5 bg-gradient-to-r from-gray-50 to-white rounded-xl hover:from-gray-100 hover:to-gray-50 transition-all duration-300 border border-gray-100 hover:border-gray-200 hover:scale-102 cursor-pointer"
                   >
                     <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 ${
-                        activity.color === 'green' ? 'bg-emerald-100 text-emerald-600' :
+                      <div className={`w-12 h-12 ${activity.color === 'green' ? 'bg-emerald-100 text-emerald-600' :
                         activity.color === 'blue' ? 'bg-blue-100 text-blue-600' :
-                        activity.color === 'purple' ? 'bg-purple-100 text-purple-600' :
-                        activity.color === 'orange' ? 'bg-amber-100 text-amber-600' :
-                        'bg-gray-100 text-gray-600'
-                      } rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
+                          activity.color === 'purple' ? 'bg-purple-100 text-purple-600' :
+                            activity.color === 'orange' ? 'bg-amber-100 text-amber-600' :
+                              'bg-gray-100 text-gray-600'
+                        } rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
                         {activity.icon}
                       </div>
                       <div className="flex-1 min-w-0">

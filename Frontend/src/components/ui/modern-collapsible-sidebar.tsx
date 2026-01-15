@@ -35,6 +35,10 @@ import { Separator } from "./separator";
 import { ScrollArea } from "./scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
 
+import { useAuth } from "../../contexts/AuthContext";
+
+// ... existing imports
+
 interface ModernCollapsibleSidebarProps {
   userRole: "driver" | "host" | "admin";
   currentPage: string;
@@ -50,33 +54,24 @@ export function ModernCollapsibleSidebar({
   onSpecialNavigation,
   onLogout,
 }: ModernCollapsibleSidebarProps) {
+  const { profile, user } = useAuth(); // Get real user data
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [notificationCount] = useState(3);
 
   const getUserInfo = () => {
-    switch (userRole) {
-      case "driver":
-        return {
-          name: "John Driver",
-          email: "john@example.com",
-          avatar: "/api/placeholder/40/40",
-          initials: "JD",
-        };
-      case "host":
-        return {
-          name: "Sarah Host",
-          email: "sarah@example.com",
-          avatar: "/api/placeholder/40/40",
-          initials: "SH",
-        };
-      case "admin":
-        return {
-          name: "Admin User",
-          email: "admin@parkmate.com",
-          avatar: "/api/placeholder/40/40",
-          initials: "AU",
-        };
-    }
+    // Fallback logic
+    const fallbackName = user?.email?.split('@')[0] || (userRole === 'host' ? 'Host' : 'Driver');
+    const firstName = profile?.first_name || fallbackName;
+    const lastName = profile?.last_name || '';
+    const fullName = profile ? `${firstName} ${lastName}`.trim() : (userRole === 'host' ? 'Sarah Host' : userRole === 'driver' ? 'John Driver' : 'Admin User');
+    const initials = (firstName[0] || '') + (lastName[0] || '');
+
+    return {
+      name: fullName,
+      email: profile?.email || user?.email || "",
+      avatar: "/api/placeholder/40/40",
+      initials: initials.toUpperCase() || (userRole === 'host' ? 'SH' : 'JD'),
+    };
   };
 
   const getNavigationItems = () => {
@@ -369,8 +364,8 @@ export function ModernCollapsibleSidebar({
                       onClick={item.onClick}
                       className={`
                         w-10 h-10 mx-auto
-                        ${item.isActive 
-                          ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white" 
+                        ${item.isActive
+                          ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white"
                           : "text-gray-600 hover:text-gray-900"
                         }
                       `}
@@ -389,8 +384,8 @@ export function ModernCollapsibleSidebar({
                   onClick={item.onClick}
                   className={`
                     w-full justify-start gap-3 h-10
-                    ${item.isActive 
-                      ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white" 
+                    ${item.isActive
+                      ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white"
                       : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
                     }
                   `}

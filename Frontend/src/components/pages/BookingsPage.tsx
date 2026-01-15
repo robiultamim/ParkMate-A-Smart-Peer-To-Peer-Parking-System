@@ -1,99 +1,99 @@
-import { Clock, MapPin, Calendar, CheckCircle, XCircle, Timer, Navigation, Star, RefreshCw, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
+import { MapPin, Calendar, CheckCircle, XCircle, Timer, Navigation, Star, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
 export function BookingsPage() {
-  const activeBookings = [
-    {
-      id: 1,
-      location: "Central Plaza Parking",
-      address: "123 Main St",
-      date: "Today",
-      time: "2:00 PM - 4:00 PM",
-      price: "$5.00",
-      status: "active",
-      timeLeft: "1h 23m",
-      spotNumber: "A-12"
-    }
-  ];
+  const { user } = useAuth();
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const upcomingBookings = [
-    {
-      id: 2,
-      location: "Downtown Garage",
-      address: "456 Business Ave",
-      date: "Tomorrow",
-      time: "9:00 AM - 11:00 AM",
-      price: "$6.00",
-      status: "confirmed",
-      spotNumber: "B-08"
-    },
-    {
-      id: 3,
-      location: "Mall Parking",
-      address: "789 Shopping Blvd",
-      date: "Dec 30",
-      time: "3:00 PM - 6:00 PM",
-      price: "$4.50",
-      status: "confirmed",
-      spotNumber: "C-15"
-    },
-    {
-      id: 6,
-      location: "Business District",
-      address: "100 Corporate Dr",
-      date: "Jan 2",
-      time: "8:00 AM - 5:00 PM",
-      price: "$32.00",
-      status: "confirmed",
-      spotNumber: "D-22"
+  useEffect(() => {
+    if (user) {
+      fetchBookings();
     }
-  ];
+  }, [user]);
 
-  const pastBookings = [
-    {
-      id: 4,
-      location: "City Center Lot",
-      address: "321 Urban St",
-      date: "Dec 26",
-      time: "10:00 AM - 2:00 PM",
-      price: "$8.00",
-      status: "completed",
-      rating: 4.5
-    },
-    {
-      id: 5,
-      location: "Airport Parking",
-      address: "Airport Terminal",
-      date: "Dec 20",
-      time: "6:00 AM - 8:00 PM",
-      price: "$25.00",
-      status: "completed",
-      rating: 4.8
-    },
-    {
-      id: 7,
-      location: "Sports Stadium",
-      address: "Sports Complex",
-      date: "Dec 15",
-      time: "6:00 PM - 11:00 PM",
-      price: "$15.00",
-      status: "completed",
-      rating: 4.2
-    },
-    {
-      id: 8,
-      location: "Shopping Mall",
-      address: "Retail Center",
-      date: "Dec 10",
-      time: "1:00 PM - 4:00 PM",
-      price: "$7.50",
-      status: "completed",
-      rating: 4.6
+  const fetchBookings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          parking_spaces!space_id (
+            name,
+            address,
+            photos
+          )
+        `)
+        .eq('driver_id', user!.id)
+        .order('start_time', { ascending: false });
+
+      if (error) throw error;
+      setBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  const now = new Date();
+
+  // Active: Confirmed AND currently happening
+  const activeBookings = bookings.filter(b =>
+  (b.status === 'active' || (b.status === 'confirmed' &&
+    new Date(b.start_time).getTime() - 15 * 60000 <= now.getTime() &&
+    new Date(b.end_time) > now))
+  ).map(b => ({
+    id: b.id,
+    location: b.parking_spaces?.name || 'Unknown Location',
+    address: b.parking_spaces?.address || '',
+    date: new Date(b.start_time).toLocaleDateString(),
+    time: `${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+    price: `$${b.total_price}`,
+    status: 'active',
+    timeLeft: `${Math.ceil((new Date(b.end_time).getTime() - now.getTime()) / (1000 * 60))}m`,
+    spotNumber: 'A-1' // Placeholder as specific spot allocation might not be in db yet
+  }));
+
+  // Upcoming: Pending OR (Confirmed AND future)
+  const upcomingBookings = bookings.filter(b =>
+    b.status === 'pending' ||
+    (b.status === 'confirmed' && new Date(b.start_time) > now)
+  ).map(b => ({
+    id: b.id,
+    location: b.parking_spaces?.name || 'Unknown Location',
+    address: b.parking_spaces?.address || '',
+    date: new Date(b.start_time).toLocaleDateString(),
+    time: `${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+    price: `$${b.total_price}`,
+    status: b.status,
+    spotNumber: 'TBD'
+  }));
+
+  // Past: Completed/Cancelled OR (Confirmed AND past)
+  const pastBookings = bookings.filter(b =>
+    ['completed', 'cancelled', 'rejected'].includes(b.status) ||
+    (b.status === 'confirmed' && new Date(b.end_time) <= now)
+  ).map(b => ({
+    id: b.id,
+    location: b.parking_spaces?.name || 'Unknown Location',
+    address: b.parking_spaces?.address || '',
+    date: new Date(b.start_time).toLocaleDateString(),
+    time: `${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+    price: `$${b.total_price}`,
+    status: b.status,
+    rating: 0 // Placeholder
+  }));
+
+  if (loading) {
+    return <div className="p-8 text-center">Loading bookings...</div>;
+  }
 
   return (
     <div className="space-y-8">
@@ -145,22 +145,22 @@ export function BookingsPage() {
       <Tabs defaultValue="upcoming" className="space-y-8">
         <div className="flex justify-center">
           <TabsList className="bg-white/90 backdrop-blur-sm professional-shadow border-0 p-2 rounded-2xl">
-            <TabsTrigger 
-              value="active" 
+            <TabsTrigger
+              value="active"
               className="px-6 py-3 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-600 data-[state=active]:to-emerald-600 data-[state=active]:text-white transition-all duration-300"
             >
               <Timer className="w-4 h-4 mr-2" />
               Active ({activeBookings.length})
             </TabsTrigger>
-            <TabsTrigger 
-              value="upcoming" 
+            <TabsTrigger
+              value="upcoming"
               className="px-6 py-3 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-blue-600 data-[state=active]:text-white transition-all duration-300"
             >
               <Calendar className="w-4 h-4 mr-2" />
               Upcoming ({upcomingBookings.length})
             </TabsTrigger>
-            <TabsTrigger 
-              value="past" 
+            <TabsTrigger
+              value="past"
               className="px-6 py-3 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-gray-600 data-[state=active]:to-gray-700 data-[state=active]:text-white transition-all duration-300"
             >
               <CheckCircle className="w-4 h-4 mr-2" />
@@ -196,7 +196,7 @@ export function BookingsPage() {
                         </Badge>
                       </div>
                     </div>
-                    
+
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -264,7 +264,7 @@ export function BookingsPage() {
                       </Badge>
                     </div>
                   </div>
-                  
+
                   <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-4 border border-purple-200">
                     <p className="text-sm text-purple-700 font-medium mb-1">Scheduled Time</p>
                     <p className="font-semibold text-gray-900">{booking.date} • {booking.time}</p>
@@ -316,7 +316,7 @@ export function BookingsPage() {
                       </Badge>
                     </div>
                   </div>
-                  
+
                   <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
                     <p className="text-sm text-gray-600 font-medium mb-1">Date & Time</p>
                     <p className="font-semibold text-gray-900">{booking.date} • {booking.time}</p>

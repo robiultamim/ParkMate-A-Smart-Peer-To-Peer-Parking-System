@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 import { MapPin, Clock, Calendar, CreditCard, Car, Bike, Truck, Star, Info, Check, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -17,32 +20,70 @@ interface BookNowPageProps {
 }
 
 export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
+  const { user } = useAuth();
   const [selectedVehicle, setSelectedVehicle] = useState('car');
   const [selectedDuration, setSelectedDuration] = useState('2');
   const [paymentMethod, setPaymentMethod] = useState('bkash');
+  const [realSpot, setRealSpot] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [licensePlate, setLicensePlate] = useState('');
+  const [startTime, setStartTime] = useState(new Date().toISOString().slice(0, 16));
 
-  // Mock parking spot data
+
+
+  useEffect(() => {
+    fetchSpotDetails();
+  }, [spotId]);
+
+  const fetchSpotDetails = async () => {
+    try {
+      // If spotId is provided, use it. Otherwise fetch the first available one as fallback/demo.
+      let query = supabase.from('parking_spaces').select('*');
+
+      if (spotId) {
+        query = query.eq('id', spotId);
+      } else {
+        query = query.eq('availability_status', 'available').limit(1);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error fetching spot:', error);
+      } else if (data && data.length > 0) {
+        setRealSpot(data[0]);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching spot:', err);
+    }
+  };
+
+  // Use real spot data if available, otherwise mock data but using real rate logic if possible
+  // Logic: "car bike truck all will have same price which will we taken from table"
+  const baseRate = realSpot?.hourly_rate || 3.50; // Default to 3.50 as requested if DB fails
+
   const spotData = {
-    id: spotId || '1',
-    name: 'Central Plaza Parking',
-    address: '123 Main Street, Downtown',
+    id: realSpot?.id || spotId || '1',
+    name: realSpot?.name || 'Central Plaza Parking',
+    address: realSpot?.address || '123 Main Street, Downtown',
     distance: '0.2 miles away',
     rating: 4.8,
     reviews: 127,
-    type: 'Covered Garage',
+    type: realSpot?.space_type || 'Covered Garage',
     security: 'CCTV Monitored',
     features: ['24/7 Access', 'Security Guard', 'Car Wash', 'EV Charging'],
     pricing: {
-      car: { hourly: 2.50, daily: 15.00 },
-      bike: { hourly: 1.00, daily: 6.00 },
-      truck: { hourly: 4.00, daily: 25.00 }
+      car: { hourly: baseRate, daily: baseRate * 6 },
+      bike: { hourly: baseRate, daily: baseRate * 6 },
+      truck: { hourly: baseRate, daily: baseRate * 6 }
     },
-    availability: 8,
-    images: ['/placeholder-parking.jpg']
+    availability: realSpot?.total_spots || 8,
+    images: realSpot?.photos || ['/placeholder-parking.jpg']
   };
 
   const calculateTotal = () => {
-    const vehicleRate = spotData.pricing[selectedVehicle].hourly;
+    // All vehicles use the same base rate as per requirement
+    const vehicleRate = spotData.pricing[selectedVehicle as keyof typeof spotData.pricing].hourly;
     const hours = parseInt(selectedDuration);
     const subtotal = vehicleRate * hours;
     const serviceFee = subtotal * 0.1; // 10% service fee
@@ -51,6 +92,52 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
   };
 
   const { subtotal, serviceFee, total } = calculateTotal();
+
+  const handleBookNow = async () => {
+    if (!user) {
+      toast.error('Please login to book a spot');
+      return;
+    }
+
+    if (!licensePlate) {
+      toast.error('Please enter your license plate number');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const startDateTime = new Date(startTime);
+      const endDateTime = new Date(startDateTime.getTime() + parseInt(selectedDuration) * 60 * 60 * 1000);
+
+      const bookingPayload = {
+        driver_id: user.id,
+        space_id: spotData.id,
+        start_time: startDateTime.toISOString(),
+        end_time: endDateTime.toISOString(),
+        total_price: total,
+        status: 'pending',
+        vehicle_type: selectedVehicle,
+        license_plate: licensePlate,
+        payment_status: 'pending'
+      };
+
+      const { error } = await supabase
+        .from('bookings')
+        .insert([bookingPayload])
+        .select();
+
+      if (error) throw error;
+
+      toast.success('Booking requested successfully! Waiting for owner approval.');
+      if (onBack) onBack();
+
+    } catch (error: any) {
+      console.error('Booking error:', error);
+      toast.error(error.message || 'Failed to create booking');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -171,7 +258,8 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                 <Input
                   id="start-time"
                   type="datetime-local"
-                  defaultValue={new Date().toISOString().slice(0, 16)}
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
                   className="mt-1"
                 />
               </div>
@@ -204,6 +292,8 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                 <Input
                   id="license-plate"
                   placeholder="Enter license plate"
+                  value={licensePlate}
+                  onChange={(e) => setLicensePlate(e.target.value)}
                   className="mt-1"
                 />
               </div>
@@ -242,7 +332,7 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
         <div className="lg:col-span-1">
           <Card className="p-6 sticky top-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Booking Summary</h3>
-            
+
             <div className="space-y-4 mb-6">
               <div className="flex justify-between">
                 <span className="text-gray-600">Vehicle Type</span>
@@ -256,9 +346,9 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                 <span className="text-gray-600">Rate</span>
                 <span className="font-medium">${spotData.pricing[selectedVehicle].hourly}/hour</span>
               </div>
-              
+
               <Separator />
-              
+
               <div className="flex justify-between">
                 <span className="text-gray-600">Subtotal</span>
                 <span className="font-medium">${subtotal.toFixed(2)}</span>
@@ -267,9 +357,9 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                 <span className="text-gray-600">Service Fee (10%)</span>
                 <span className="font-medium">${serviceFee.toFixed(2)}</span>
               </div>
-              
+
               <Separator />
-              
+
               <div className="flex justify-between text-lg">
                 <span className="font-semibold">Total</span>
                 <span className="font-bold text-purple-600">${total.toFixed(2)}</span>
@@ -290,7 +380,7 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                       </div>
                     </Label>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2 p-3 border rounded-lg">
                     <RadioGroupItem value="nagad" id="nagad" />
                     <Label htmlFor="nagad" className="flex-1 cursor-pointer">
@@ -300,7 +390,7 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                       </div>
                     </Label>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2 p-3 border rounded-lg">
                     <RadioGroupItem value="rocket" id="rocket" />
                     <Label htmlFor="rocket" className="flex-1 cursor-pointer">
@@ -310,7 +400,7 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
                       </div>
                     </Label>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2 p-3 border rounded-lg">
                     <RadioGroupItem value="card" id="card" />
                     <Label htmlFor="card" className="flex-1 cursor-pointer">
@@ -335,12 +425,23 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
             </div>
 
             {/* Book Now Button */}
-            <Button 
+            <Button
+              onClick={handleBookNow}
+              disabled={loading}
               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-lg py-3"
               size="lg"
             >
-              <CreditCard className="w-5 h-5 mr-2" />
-              Book Now - ${total.toFixed(2)}
+              {loading ? (
+                <div className="flex items-center">
+                  <div className="animate-spin mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                  Processing...
+                </div>
+              ) : (
+                <>
+                  <CreditCard className="w-5 h-5 mr-2" />
+                  Book Now - ${total.toFixed(2)}
+                </>
+              )}
             </Button>
 
             {/* Security Information */}

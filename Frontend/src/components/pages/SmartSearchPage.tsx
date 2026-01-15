@@ -25,7 +25,11 @@ import { Checkbox } from "../ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
-export function SmartSearchPage() {
+interface SmartSearchPageProps {
+  onNavigate?: (page: string, params?: any) => void;
+}
+
+export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [priceRange, setPriceRange] = useState([0, 50]);
   const [maxDistance, setMaxDistance] = useState([2]);
@@ -400,7 +404,10 @@ export function SmartSearchPage() {
                         </div>
 
                         <div className="space-y-2">
-                          <Button className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
+                          <Button
+                            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                            onClick={() => onNavigate?.('book-now', { id: spot.id })}
+                          >
                             <Clock className="w-4 h-4 mr-2" />
                             Book Now
                           </Button>

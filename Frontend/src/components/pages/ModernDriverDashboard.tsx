@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Users,
     DollarSign,
@@ -28,6 +28,8 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 interface ModernDriverDashboardProps {
     onNavigate: (page: string) => void;
@@ -35,18 +37,63 @@ interface ModernDriverDashboardProps {
 }
 
 export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: ModernDriverDashboardProps) {
+    const { profile, user } = useAuth();
     const [dateFilter, setDateFilter] = useState('March 30, 2024');
+    const [stats, setStats] = useState({
+        bookings: '0',
+        activeSpaces: '0',
+        earnings: '$0',
+        activeBookings: '0'
+    });
+
+    useEffect(() => {
+        async function fetchStats() {
+            if (!user) return;
+
+            if (userRole === 'host') {
+                // Fetch spaces count
+                const { count: spacesCount } = await supabase
+                    .from('parking_spaces')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('owner_id', user.id);
+
+                // Fetch bookings/earnings would go here. For now we just Mock it but spaces is real
+                setStats(prev => ({
+                    ...prev,
+                    activeSpaces: spacesCount?.toString() || '0'
+                }));
+            } else if (userRole === 'driver') {
+                // Try to fetch bookings count if table exists, otherwise wrap in try/catch or just leave as 0 if we aren't sure
+                try {
+                    const { count: bookingsCount } = await supabase
+                        .from('bookings')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('driver_id', user.id);
+
+                    if (bookingsCount !== null) {
+                        setStats(prev => ({ ...prev, bookings: bookingsCount.toString() }));
+                    }
+                } catch (e) {
+                    console.log('Bookings table might not exist yet or error fetching', e);
+                }
+            }
+        }
+        fetchStats();
+    }, [user, userRole]);
+
 
     const getMetricsData = () => {
+        const firstName = profile?.first_name || (userRole === 'host' ? 'Host' : 'Driver');
+
         switch (userRole) {
             case 'driver':
                 return {
-                    title: 'Driver Overview',
+                    title: `Welcome back, ${firstName}`,
                     metrics: [
                         {
                             id: 'spots',
                             label: 'Available spots',
-                            value: '2,847',
+                            value: '2,847', // Global stat, keep mocked for now
                             change: '+124',
                             changePercent: '20%',
                             trend: 'up',
@@ -56,7 +103,7 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                         {
                             id: 'bookings',
                             label: 'Your bookings',
-                            value: '147',
+                            value: stats.bookings,
                             change: '+23',
                             changePercent: '15%',
                             trend: 'up',
@@ -103,12 +150,12 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                 };
             case 'host':
                 return {
-                    title: 'Host Analytics',
+                    title: `Welcome back, ${firstName}`,
                     metrics: [
                         {
                             id: 'earnings',
                             label: 'Monthly earnings',
-                            value: '$2,847',
+                            value: stats.earnings !== '$0' ? stats.earnings : '$2,847', // Use mock if 0 for demo
                             change: '+$324',
                             changePercent: '12%',
                             trend: 'up',
@@ -118,7 +165,7 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                         {
                             id: 'spaces',
                             label: 'Active spaces',
-                            value: '5',
+                            value: stats.activeSpaces,
                             change: '+1',
                             changePercent: '25%',
                             trend: 'up',
@@ -377,8 +424,8 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                     <Badge
                         variant="secondary"
                         className={`${systemHealth >= 95 ? 'bg-green-100 text-green-700' :
-                                systemHealth >= 80 ? 'bg-blue-100 text-blue-700' :
-                                    'bg-orange-100 text-orange-700'
+                            systemHealth >= 80 ? 'bg-blue-100 text-blue-700' :
+                                'bg-orange-100 text-orange-700'
                             }`}
                     >
                         {statusText}
@@ -479,16 +526,16 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                         <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-3">
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${metric.color === 'blue' ? 'bg-blue-100' :
-                                        metric.color === 'green' ? 'bg-green-100' :
-                                            metric.color === 'purple' ? 'bg-purple-100' :
-                                                metric.color === 'orange' ? 'bg-orange-100' :
-                                                    'bg-red-100'
+                                    metric.color === 'green' ? 'bg-green-100' :
+                                        metric.color === 'purple' ? 'bg-purple-100' :
+                                            metric.color === 'orange' ? 'bg-orange-100' :
+                                                'bg-red-100'
                                     }`}>
                                     <metric.icon className={`w-5 h-5 ${metric.color === 'blue' ? 'text-blue-600' :
-                                            metric.color === 'green' ? 'text-green-600' :
-                                                metric.color === 'purple' ? 'text-purple-600' :
-                                                    metric.color === 'orange' ? 'text-orange-600' :
-                                                        'text-red-600'
+                                        metric.color === 'green' ? 'text-green-600' :
+                                            metric.color === 'purple' ? 'text-purple-600' :
+                                                metric.color === 'orange' ? 'text-orange-600' :
+                                                    'text-red-600'
                                         }`} />
                                 </div>
                                 <div>

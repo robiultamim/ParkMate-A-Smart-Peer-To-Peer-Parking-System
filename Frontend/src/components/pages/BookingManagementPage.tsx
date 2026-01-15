@@ -1,68 +1,125 @@
+import { useEffect, useState } from 'react';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
+import { toast } from 'sonner';
 import { Clock, CheckCircle, XCircle, MapPin, Car, User, Phone, Star, Timer } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Avatar } from '../ui/avatar';
-import { useState } from 'react';
+import { Label } from '../ui/label';
 
 export function BookingManagementPage() {
-  const [pendingBookings, setPendingBookings] = useState([
-    {
-      id: 1,
-      customerName: "John Doe",
-      customerRating: 4.8,
-      customerPhone: "+1234567890",
-      space: "Central Plaza Garage",
-      spotRequested: "Any available",
-      vehicle: "Toyota Camry (ABC-123)",
-      vehicleType: "Car",
-      checkIn: "Today 2:00 PM",
-      checkOut: "Today 5:00 PM",
-      duration: "3 hours",
-      totalAmount: 7.50,
-      bookingTime: "2 minutes ago",
-      notes: "Need a spot close to the elevator if possible"
-    },
-    {
-      id: 2,
-      customerName: "Sarah Wilson",
-      customerRating: 4.6,
-      customerPhone: "+1987654321",
-      space: "Mall Parking Lot",
-      spotRequested: "Covered area",
-      vehicle: "Honda CR-V (XYZ-789)",
-      vehicleType: "SUV",
-      checkIn: "Tomorrow 10:00 AM",
-      checkOut: "Tomorrow 2:00 PM", 
-      duration: "4 hours",
-      totalAmount: 10.00,
-      bookingTime: "15 minutes ago",
-      notes: "First time parking here"
-    }
-  ]);
+  const { user } = useAuth();
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const confirmedBookings = [
-    {
-      id: 3,
-      customerName: "Mike Johnson",
-      customerRating: 4.9,
-      space: "Central Plaza Garage",
-      spot: "A-12",
-      vehicle: "BMW 320i (DEF-456)",
-      vehicleType: "Car",
-      checkIn: "Today 6:00 PM",
-      checkOut: "Today 9:00 PM",
-      duration: "3 hours",
-      totalAmount: 7.50,
-      status: "confirmed"
+  useEffect(() => {
+    if (user) {
+      fetchBookings();
     }
-  ];
+  }, [user]);
 
-  const handleBookingAction = (bookingId: number, action: 'approve' | 'reject') => {
-    setPendingBookings(prev => prev.filter(booking => booking.id !== bookingId));
-    // In real app, would make API call here
+  const fetchBookings = async () => {
+    try {
+      // Fetch bookings for spots owned by current user
+      // Assuming parking_spaces has owner_id and bookings has parking_spot_id FK to parking_spaces
+
+      // First get my spots
+      const { data: spots, error: spotsError } = await supabase
+        .from('parking_spaces')
+        .select('id')
+        .eq('owner_id', user!.id);
+
+      if (spotsError) throw spotsError;
+
+      const spotIds = spots.map(s => s.id);
+
+      if (spotIds.length === 0) {
+        setBookings([]);
+        setLoading(false);
+        return;
+      }
+
+      // Then get bookings for those spots
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          parking_spaces!space_id (name, address),
+          profiles:driver_id (full_name, phone_number, avatar_url) 
+        `) // Assuming 'profiles' relationship
+        .in('space_id', spotIds)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleBookingAction = async (bookingId: number, action: 'approve' | 'reject') => {
+    const status = action === 'approve' ? 'confirmed' : 'rejected';
+
+    // Optimistic update
+    setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status } : b));
+
+    try {
+      const { error } = await supabase
+        .from('bookings')
+        .update({ status })
+        .eq('id', bookingId);
+
+      if (error) throw error;
+
+      toast.success(`Booking ${action}d successfully`);
+    } catch (error) {
+      console.error('Error updating booking:', error);
+      toast.error('Failed to update booking status');
+      // Revert optimistic update
+      fetchBookings();
+    }
+  };
+
+  const pendingBookings = bookings.filter(b => b.status === 'pending').map(b => ({
+    id: b.id,
+    customerName: b.profiles?.full_name || 'Unknown User',
+    customerRating: 5.0, // Placeholder
+    customerPhone: b.profiles?.phone_number || 'N/A',
+    space: b.parking_spaces?.name || 'Unknown Space',
+    spotRequested: 'General',
+    vehicle: `${b.vehicle_type} (${b.license_plate})`,
+    vehicleType: b.vehicle_type,
+    checkIn: new Date(b.start_time).toLocaleString(),
+    checkOut: new Date(b.end_time).toLocaleString(),
+    duration: `${Math.ceil((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / (1000 * 60 * 60))} hours`,
+    totalAmount: b.total_price,
+    bookingTime: new Date(b.created_at).toLocaleDateString(),
+    notes: ''
+  }));
+
+  const confirmedBookings = bookings.filter(b => b.status === 'confirmed').map(b => ({
+    id: b.id,
+    customerName: b.profiles?.full_name || 'Unknown User',
+    customerRating: 5.0,
+    space: b.parking_spaces?.name,
+    spot: 'Assigned',
+    vehicle: `${b.vehicle_type} (${b.license_plate})`,
+    vehicleType: b.vehicle_type,
+    checkIn: new Date(b.start_time).toLocaleString(),
+    checkOut: new Date(b.end_time).toLocaleString(),
+    duration: `${Math.ceil((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / (1000 * 60 * 60))} hours`,
+    totalAmount: b.total_price,
+    status: 'confirmed'
+  }));
+
+  if (loading) {
+    return <div className="p-8 text-center text-gray-500">Loading bookings...</div>;
+  }
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6 space-y-6 pb-24">
@@ -151,15 +208,15 @@ export function BookingManagementPage() {
 
                   {/* Action Buttons */}
                   <div className="flex gap-3 pt-2 border-t border-gray-200">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       className="flex-1"
                       onClick={() => handleBookingAction(booking.id, 'reject')}
                     >
                       <XCircle className="w-4 h-4 mr-2" />
                       Decline
                     </Button>
-                    <Button 
+                    <Button
                       className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600"
                       onClick={() => handleBookingAction(booking.id, 'approve')}
                     >

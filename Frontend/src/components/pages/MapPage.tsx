@@ -6,7 +6,11 @@ import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Input } from '../ui/input';
 
-export function MapPage() {
+interface MapPageProps {
+  onNavigate?: (page: string, params?: any) => void;
+}
+
+export function MapPage({ onNavigate }: MapPageProps) {
   const [spots, setSpots] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -274,7 +278,10 @@ export function MapPage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 hover-scale professional-shadow px-6">
+                    <Button
+                      onClick={() => onNavigate?.('book-now', { id: spot.id })}
+                      className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 hover-scale professional-shadow px-6"
+                    >
                       Book Now
                     </Button>
                   </div>

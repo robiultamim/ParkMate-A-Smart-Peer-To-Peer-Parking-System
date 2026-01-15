@@ -45,17 +45,25 @@ import { ScrollArea } from '../ui/scroll-area';
 
 interface SpaceOwnerDashboardProps {
   onNavigate: (page: string) => void;
+  defaultTab?: string;
 }
 
-export function SpaceOwnerDashboard({ onNavigate }: SpaceOwnerDashboardProps) {
+export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: SpaceOwnerDashboardProps) {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(defaultTab);
+
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab]);
   const [spaces, setSpaces] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSpace, setSelectedSpace] = useState<any>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [pendingBookings, setPendingBookings] = useState<any[]>([]);
 
   // Edit form state
   const [editName, setEditName] = useState('');
@@ -96,10 +104,100 @@ export function SpaceOwnerDashboard({ onNavigate }: SpaceOwnerDashboardProps) {
 
       if (error) throw error;
       setSpaces(data || []);
+
+      // After fetching spaces, fetch pending requests for these spaces
+      if (data && data.length > 0) {
+        fetchPendingRequests(data.map((s: any) => s.id));
+      }
     } catch (err) {
       console.error('Error fetching name:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPendingRequests = async (spaceIds: string[]) => {
+    try {
+      const { data: bookingsData, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(`
+            *,
+            parking_spaces!space_id (name)
+          `)
+        .in('space_id', spaceIds)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (bookingsError) throw bookingsError;
+
+      const bookings = bookingsData || [];
+
+      // Manually fetch profiles since foreign key relationship is missing or ambiguous
+      const driverIds = [...new Set(bookings.map((b: any) => b.driver_id))];
+
+      let profilesMap: Record<string, any> = {};
+
+      if (driverIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('user_profiles')
+          .select('user_id, first_name, last_name, phone')
+          .in('user_id', driverIds);
+
+        if (profilesData) {
+          profilesData.forEach((p: any) => {
+            profilesMap[p.user_id] = p;
+          });
+        }
+      }
+
+      const formattedRequests = bookings.map((b: any) => {
+        const profile = profilesMap[b.driver_id];
+        const fullName = profile ? `${profile.first_name} ${profile.last_name}` : 'Unknown User';
+
+        return {
+          id: b.id,
+          renterName: fullName,
+          renterRating: 5.0, // Placeholder
+          spaceName: b.parking_spaces?.name || 'Unknown Space',
+          vehicleType: b.vehicle_type || 'Car',
+          amount: `$${b.total_price}`,
+          duration: `${Math.ceil((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / (1000 * 60 * 60))} hours`,
+          startTime: new Date(b.start_time).toLocaleString(),
+          requestTime: new Date(b.created_at).toLocaleDateString()
+        };
+      });
+
+      setPendingBookings(formattedRequests);
+    } catch (err) {
+      console.error('Error fetching pending bookings:', err);
+    }
+  };
+
+  const handleBookingAction = async (bookingId: number, action: 'approve' | 'reject') => {
+    const status = action === 'approve' ? 'confirmed' : 'rejected';
+
+    // Optimistic update
+    setPendingBookings(prev => prev.filter(b => b.id !== bookingId));
+
+    try {
+      const { error } = await supabase
+        .from('bookings')
+        .update({ status })
+        .eq('id', bookingId);
+
+      if (error) throw error;
+
+      toast.success(`Booking ${action}d successfully`);
+      // Refresh to ensure sync
+      const spaceIds = spaces.map(s => s.id);
+      if (spaceIds.length > 0) fetchPendingRequests(spaceIds);
+
+    } catch (error) {
+      console.error('Error updating booking:', error);
+      toast.error('Failed to update booking status');
+      // Revert optimistic update ideally, but re-fetching covers it
+      const spaceIds = spaces.map(s => s.id);
+      if (spaceIds.length > 0) fetchPendingRequests(spaceIds);
     }
   };
 
@@ -273,7 +371,7 @@ export function SpaceOwnerDashboard({ onNavigate }: SpaceOwnerDashboardProps) {
     type: space.space_type || 'Parking Space',
     location: space.address,
     pricing: {
-      car: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A',
+      car: space.hourly_rate ? `$${space.hourly_rate} /hr` : 'N/A',
       bike: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A',
       truck: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A'
     },
@@ -289,44 +387,7 @@ export function SpaceOwnerDashboard({ onNavigate }: SpaceOwnerDashboardProps) {
     raw: space
   }));
 
-  const pendingRequests = [
-    {
-      id: 1,
-      renterName: 'John Smith',
-      spaceId: 1,
-      spaceName: 'Downtown Garage Spot A',
-      vehicleType: 'Car',
-      duration: '3 hours',
-      startTime: 'Today 2:00 PM',
-      amount: '$10.50',
-      requestTime: '15 minutes ago',
-      renterRating: 4.8
-    },
-    {
-      id: 2,
-      renterName: 'Maria Garcia',
-      spaceId: 3,
-      spaceName: 'Shopping Mall Spot',
-      vehicleType: 'SUV',
-      duration: '2.5 hours',
-      startTime: 'Tomorrow 10:00 AM',
-      amount: '$6.25',
-      requestTime: '1 hour ago',
-      renterRating: 4.9
-    },
-    {
-      id: 3,
-      renterName: 'Alex Chen',
-      spaceId: 2,
-      spaceName: 'Residential Driveway',
-      vehicleType: 'Motorcycle',
-      duration: '4 hours',
-      startTime: 'Today 6:00 PM',
-      amount: '$4.00',
-      requestTime: '2 hours ago',
-      renterRating: 4.6
-    }
-  ];
+
 
   const recentEarnings = [
     { date: 'Today', amount: '$47.50', bookings: 8 },
@@ -680,68 +741,81 @@ export function SpaceOwnerDashboard({ onNavigate }: SpaceOwnerDashboardProps) {
                   <p className="text-gray-600">Review and approve parking requests from drivers</p>
                 </div>
                 <Badge variant="secondary" className="bg-orange-100 text-orange-700">
-                  {pendingRequests.length} pending
+                  {pendingBookings.length} pending
                 </Badge>
               </div>
             </div>
             <div className="p-6">
-              <div className="space-y-4">
-                {pendingRequests.map((request) => (
-                  <div key={request.id} className="border border-gray-200 rounded-xl p-6 hover:bg-gray-50 transition-colors">
-                    <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 bg-gradient-to-r from-blue-100 to-purple-100 rounded-xl flex items-center justify-center">
-                            <Users className="w-6 h-6 text-blue-600" />
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h4 className="font-semibold text-gray-900">{request.renterName}</h4>
-                              <div className="flex items-center gap-1">
-                                <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                                <span className="text-sm text-gray-600">{request.renterRating}</span>
-                              </div>
+              {pendingBookings.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No pending requests</div>
+              ) : (
+                <div className="space-y-4">
+                  {pendingBookings.map((request) => (
+                    <div key={request.id} className="border border-gray-200 rounded-xl p-6 hover:bg-gray-50 transition-colors">
+                      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 bg-gradient-to-r from-blue-100 to-purple-100 rounded-xl flex items-center justify-center">
+                              <Users className="w-6 h-6 text-blue-600" />
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
-                              <div>
-                                <span className="font-medium">Space:</span> {request.spaceName}
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="font-semibold text-gray-900">{request.renterName}</h4>
+                                <div className="flex items-center gap-1">
+                                  <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                                  <span className="text-sm text-gray-600">{request.renterRating}</span>
+                                </div>
                               </div>
-                              <div>
-                                <span className="font-medium">Vehicle:</span> {request.vehicleType}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+                                <div>
+                                  <span className="font-medium">Space:</span> {request.spaceName}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Vehicle:</span> {request.vehicleType}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Duration:</span> {request.duration}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Start Time:</span> {request.startTime}
+                                </div>
                               </div>
-                              <div>
-                                <span className="font-medium">Duration:</span> {request.duration}
-                              </div>
-                              <div>
-                                <span className="font-medium">Start Time:</span> {request.startTime}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4 mt-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-600">Amount:</span>
-                                <span className="font-semibold text-green-600">{request.amount}</span>
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                Requested {request.requestTime}
+                              <div className="flex items-center gap-4 mt-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-600">Amount:</span>
+                                  <span className="font-semibold text-green-600">{request.amount}</span>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Requested {request.requestTime}
+                                </div>
                               </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex gap-3">
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
-                          <CheckCircle className="w-4 h-4 mr-2" />
-                          Approve
-                        </Button>
-                        <Button size="sm" variant="outline" className="border-red-200 text-red-700 hover:bg-red-50">
-                          <XCircle className="w-4 h-4 mr-2" />
-                          Decline
-                        </Button>
+                        <div className="flex gap-3">
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => handleBookingAction(request.id, 'approve')}
+                          >
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-red-200 text-red-700 hover:bg-red-50"
+                            onClick={() => handleBookingAction(request.id, 'reject')}
+                          >
+                            <XCircle className="w-4 h-4 mr-2" />
+                            Decline
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </Card>
         </TabsContent>

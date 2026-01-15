@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger
 } from "./dropdown-menu";
 import { ParkMateLogo } from "./parkmate-logo";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface ModernFixedHeaderProps {
   userRole: "driver" | "host" | "admin";
@@ -51,33 +52,32 @@ export function ModernFixedHeader({
   onSpecialNavigation,
   onLogout,
 }: ModernFixedHeaderProps) {
+  const { profile, user } = useAuth(); // Get real user data
   const [notificationCount] = useState(3);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const getUserInfo = () => {
-    switch (userRole) {
-      case "driver":
-        return {
-          name: "John Driver",
-          email: "john@example.com",
-          avatar: "/api/placeholder/40/40",
-          initials: "JD",
-        };
-      case "host":
-        return {
-          name: "Sarah Host",
-          email: "sarah@example.com",
-          avatar: "/api/placeholder/40/40",
-          initials: "SH",
-        };
-      case "admin":
-        return {
-          name: "Admin User",
-          email: "admin@parkmate.com",
-          avatar: "/api/placeholder/40/40",
-          initials: "AU",
-        };
+    if (profile) {
+      const firstName = profile.first_name || 'User';
+      const lastName = profile.last_name || '';
+      const fullName = `${firstName} ${lastName}`.trim();
+      const initials = (firstName[0] || '') + (lastName[0] || '');
+
+      return {
+        name: fullName,
+        email: profile.email || user?.email || '',
+        avatar: "/api/placeholder/40/40", // Keep placeholder or use profile.avatar_url if added later
+        initials: initials.toUpperCase() || 'U',
+      };
     }
+
+    // Fallback if profile not loaded yet (though App.tsx usually handles this)
+    return {
+      name: user?.email?.split('@')[0] || "Guest User",
+      email: user?.email || "",
+      avatar: "/api/placeholder/40/40",
+      initials: "GU",
+    };
   };
 
   const getNavigationItems = () => {
@@ -143,6 +143,13 @@ export function ModernFixedHeader({
           icon: Shield,
           isActive: currentPage === "host-dashboard",
           onClick: () => onSpecialNavigation("host-dashboard"),
+        },
+        {
+          id: "bookings-manage",
+          label: "Requests",
+          icon: Calendar,
+          isActive: currentPage === "bookings-manage",
+          onClick: () => onSpecialNavigation("bookings-manage"),
         },
         {
           id: "add-space",

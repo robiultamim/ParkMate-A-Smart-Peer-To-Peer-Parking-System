@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { BookNowPage } from "./components/pages/BookNowPage";
 import {
   Search,
   MapPin,
@@ -61,11 +62,22 @@ export default function App() {
     return (savedRole as "driver" | "host" | "admin") || "driver";
   });
   const [isLoading, setIsLoading] = useState(false);
-
-  // Save userRole to localStorage whenever it changes
+  const [selectedSpotId, setSelectedSpotId] = useState<string | undefined>(undefined);
+  // Sync userRole with currentPage to ensure header matches content
   useEffect(() => {
-    localStorage.setItem('activeUserRole', userRole);
-  }, [userRole]);
+    const hostPages = ['host-dashboard', 'add-space', 'earnings', 'bookings-manage', 'withdrawal', 'vehicle-pricing'];
+    const driverPages = ['find', 'map', 'bookings', 'smart-search', 'real-time', 'mobile-payments', 'gps-navigation', 'vehicle-support', 'book-now'];
+
+    if (hostPages.includes(currentPage) && userRole !== 'host') {
+      console.log('Syncing role to host based on currentPage:', currentPage);
+      setUserRole('host');
+      localStorage.setItem('activeUserRole', 'host');
+    } else if (driverPages.includes(currentPage) && userRole !== 'driver' && userRole !== 'admin') {
+      console.log('Syncing role to driver based on currentPage:', currentPage);
+      setUserRole('driver');
+      localStorage.setItem('activeUserRole', 'driver');
+    }
+  }, [currentPage, userRole]);
 
   const isAuthenticated = !!user;
 
@@ -299,7 +311,10 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
 
 
   // Handle special page navigation
-  const handleSpecialPageNavigation = (page: string) => {
+  const handleSpecialPageNavigation = (page: string, params?: any) => {
+    if (page === 'book-now' && params?.id) {
+      setSelectedSpotId(params.id);
+    }
     setCurrentPage(page);
   };
 
@@ -309,11 +324,11 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
   const renderPageContent = () => {
     switch (currentPage) {
       case "find":
-        return <ModernDriverDashboard onNavigate={handleSpecialPageNavigation} />;
+        return <ModernDriverDashboard onNavigate={handleSpecialPageNavigation} userRole={userRole} />;
       case "profile":
-        return <ProfilePage userRole={userRole} />;
+        return <ProfilePage userRole={userRole} onNavigate={handleSpecialPageNavigation} />;
       case "map":
-        return <MapPage />;
+        return <MapPage onNavigate={handleSpecialPageNavigation} />;
       case "bookings":
         return <BookingsPage />;
       case "notifications":
@@ -333,7 +348,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
       case "earnings":
         return <EarningsPage onNavigate={handleSpecialPageNavigation} />;
       case "bookings-manage":
-        return <BookingManagementPage />;
+        return <SpaceOwnerDashboard onNavigate={handleSpecialPageNavigation} defaultTab="requests" />;
       case "withdrawal":
         return <WithdrawalPage />;
       case "vehicle-pricing":
@@ -341,7 +356,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
       case "admin":
         return <AdminDashboard />;
       case "smart-search":
-        return <SmartSearchPage />;
+        return <SmartSearchPage onNavigate={handleSpecialPageNavigation} />;
       case "real-time":
         return <RealTimeAvailabilityPage />;
       case "mobile-payments":
@@ -352,6 +367,8 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
         return <VehicleSupportPage />;
       case "users":
         return <UserManagementPage />;
+      case "book-now":
+        return <BookNowPage spotId={selectedSpotId} onBack={() => handleSpecialPageNavigation('find')} />;
       default:
         return renderDashboard();
     }
