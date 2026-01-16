@@ -1,22 +1,32 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { MapPin, Calendar, CheckCircle, XCircle, Timer, Navigation, Star, RefreshCw, AlertCircle } from 'lucide-react';
+import { MapPin, Calendar, CheckCircle, XCircle, Timer, Navigation, Star, RefreshCw, AlertCircle, Clock } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 
-export function BookingsPage() {
+export function BookingsPage({ onNavigate }: { onNavigate?: (page: string, params?: any) => void }) {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     if (user) {
       fetchBookings();
     }
   }, [user]);
+
+  // Real-time timer update every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchBookings = async () => {
     try {
@@ -42,7 +52,24 @@ export function BookingsPage() {
     }
   };
 
-  const now = new Date();
+  const formatTimeRemaining = (endTime: Date) => {
+    const diff = endTime.getTime() - currentTime.getTime();
+    if (diff <= 0) return 'Expired';
+
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
+  };
+
+  const now = currentTime;
 
   // Active: Confirmed AND currently happening
   const activeBookings = bookings.filter(b =>
@@ -57,7 +84,8 @@ export function BookingsPage() {
     time: `${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
     price: `$${b.total_price}`,
     status: 'active',
-    timeLeft: `${Math.ceil((new Date(b.end_time).getTime() - now.getTime()) / (1000 * 60))}m`,
+    timeLeft: formatTimeRemaining(new Date(b.end_time)),
+    endTime: new Date(b.end_time),
     spotNumber: 'A-1' // Placeholder as specific spot allocation might not be in db yet
   }));
 
@@ -67,13 +95,15 @@ export function BookingsPage() {
     (b.status === 'confirmed' && new Date(b.start_time) > now)
   ).map(b => ({
     id: b.id,
+    spaceId: b.space_id,
     location: b.parking_spaces?.name || 'Unknown Location',
     address: b.parking_spaces?.address || '',
     date: new Date(b.start_time).toLocaleDateString(),
     time: `${new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
     price: `$${b.total_price}`,
     status: b.status,
-    spotNumber: 'TBD'
+    spotNumber: 'TBD',
+    rawData: b // Store raw booking data for modification
   }));
 
   // Past: Completed/Cancelled OR (Confirmed AND past)
@@ -209,17 +239,6 @@ export function BookingsPage() {
                         </div>
                       </div>
                     </div>
-
-                    <div className="flex gap-4">
-                      <Button variant="outline" className="flex-1 h-12 border-2 border-gray-300 hover:border-blue-400 hover:bg-blue-50">
-                        <Navigation className="w-4 h-4 mr-2" />
-                        Navigate
-                      </Button>
-                      <Button variant="destructive" className="flex-1 h-12 bg-red-500 hover:bg-red-600">
-                        <XCircle className="w-4 h-4 mr-2" />
-                        End Session
-                      </Button>
-                    </div>
                   </div>
                 </Card>
               ))}
@@ -258,10 +277,17 @@ export function BookingsPage() {
                     </div>
                     <div className="text-right">
                       <div className="text-xl font-bold text-purple-600 mb-2">{booking.price}</div>
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 px-3 py-1">
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        Confirmed
-                      </Badge>
+                      {booking.status === 'pending' ? (
+                        <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-200 px-3 py-1">
+                          <Clock className="w-3 h-3 mr-1" />
+                          Pending
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="bg-green-100 text-green-700 border-green-200 px-3 py-1">
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          Confirmed
+                        </Badge>
+                      )}
                     </div>
                   </div>
 
@@ -270,15 +296,76 @@ export function BookingsPage() {
                     <p className="font-semibold text-gray-900">{booking.date} • {booking.time}</p>
                   </div>
 
+                  {booking.status === 'pending' && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5" />
+                        <p className="text-xs text-orange-700">
+                          Waiting for owner approval. You can modify or cancel this booking.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex gap-3">
-                    <Button size="sm" variant="outline" className="flex-1 h-10 border-2 border-gray-300 hover:border-purple-400 hover:bg-purple-50">
-                      <AlertCircle className="w-4 h-4 mr-1" />
-                      Modify
-                    </Button>
-                    <Button size="sm" variant="destructive" className="flex-1 h-10 bg-red-500 hover:bg-red-600">
-                      <XCircle className="w-4 h-4 mr-1" />
-                      Cancel
-                    </Button>
+                    {booking.status === 'pending' && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 h-10 border-2 border-gray-300 hover:border-purple-400 hover:bg-purple-50"
+                          onClick={() => {
+                            if (onNavigate) {
+                              onNavigate('book-now', {
+                                id: booking.spaceId,
+                                bookingId: booking.id
+                              });
+                            }
+                          }}
+                        >
+                          <AlertCircle className="w-4 h-4 mr-1" />
+                          Modify
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="flex-1 h-10 bg-red-500 hover:bg-red-600"
+                          onClick={async () => {
+                            if (confirm('Are you sure you want to cancel this booking?')) {
+                              try {
+                                const { error } = await supabase
+                                  .from('bookings')
+                                  .update({ status: 'cancelled' })
+                                  .eq('id', booking.id);
+
+                                if (error) throw error;
+
+                                // Refresh bookings
+                                await fetchBookings();
+                                alert('Booking cancelled successfully');
+                              } catch (error) {
+                                console.error('Error cancelling booking:', error);
+                                alert('Failed to cancel booking');
+                              }
+                            }
+                          }}
+                        >
+                          <XCircle className="w-4 h-4 mr-1" />
+                          Cancel
+                        </Button>
+                      </>
+                    )}
+                    {booking.status === 'confirmed' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full h-10 border-2 border-green-300 text-green-700 hover:bg-green-50"
+                        disabled
+                      >
+                        <CheckCircle className="w-4 h-4 mr-1" />
+                        Confirmed - Cannot Modify
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -321,11 +408,6 @@ export function BookingsPage() {
                     <p className="text-sm text-gray-600 font-medium mb-1">Date & Time</p>
                     <p className="font-semibold text-gray-900">{booking.date} • {booking.time}</p>
                   </div>
-
-                  <Button variant="outline" className="w-full h-12 border-2 border-purple-200 text-purple-700 hover:bg-purple-50 hover:border-purple-400 font-medium">
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    Book Again
-                  </Button>
                 </div>
               </Card>
             ))}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { supabase } from "../../lib/supabase";
 import {
   MapPin,
   Clock,
@@ -6,121 +7,129 @@ import {
   TrendingUp,
   TrendingDown,
   AlertCircle,
-  RefreshCw,
   Car,
   Timer,
-  Calendar,
   CheckCircle,
   XCircle,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Progress } from "../ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { toast } from "sonner";
 
 export function RealTimeAvailabilityPage() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isLive, setIsLive] = useState(true);
+  const [parkingData, setParkingData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock real-time data
-  const [parkingData, setParkingData] = useState([
-    {
-      id: 1,
-      name: "Central Plaza Garage",
-      location: "Downtown",
-      available: 47,
-      total: 120,
-      trend: "stable",
-      lastChanged: "2 min ago",
-      price: 2.5,
-      status: "operational",
-      peakTime: "2:00 PM - 4:00 PM",
-      estimatedFull: "3:30 PM",
-    },
-    {
-      id: 2,
-      name: "Business District Lot",
-      location: "Financial District",
-      available: 12,
-      total: 80,
-      trend: "decreasing",
-      lastChanged: "30 sec ago",
-      price: 3.0,
-      status: "operational",
-      peakTime: "9:00 AM - 11:00 AM",
-      estimatedFull: "12:30 PM",
-    },
-    {
-      id: 3,
-      name: "Mall Parking Complex",
-      location: "Shopping Center",
-      available: 89,
-      total: 200,
-      trend: "increasing",
-      lastChanged: "1 min ago",
-      price: 1.5,
-      status: "operational",
-      peakTime: "6:00 PM - 8:00 PM",
-      estimatedFull: null,
-    },
-    {
-      id: 4,
-      name: "Airport Terminal A",
-      location: "Airport",
-      available: 0,
-      total: 150,
-      trend: "stable",
-      lastChanged: "5 min ago",
-      price: 4.0,
-      status: "full",
-      peakTime: "All day",
-      estimatedFull: "Full",
-    },
-    {
-      id: 5,
-      name: "Stadium Parking",
-      location: "Sports Complex",
-      available: 0,
-      total: 300,
-      trend: "stable",
-      lastChanged: "10 min ago",
-      price: 5.0,
-      status: "maintenance",
-      peakTime: "Event days",
-      estimatedFull: "Maintenance",
-    },
-  ]);
+  // Fetch initial data
+  const fetchParkingData = async () => {
+    try {
+      setLoading(false); // Optimize UX by not going back to full loading state on updates
 
-  // Simulate real-time updates
-  useEffect(() => {
-    if (!isLive) return;
+      // 1. Get all parking spaces
+      const { data: spaces, error: spacesError } = await supabase
+        .from('parking_spaces')
+        .select('*');
 
-    const interval = setInterval(() => {
-      setParkingData(prev => prev.map(spot => {
-        // Random availability changes for simulation
-        const changeChance = Math.random();
-        if (changeChance < 0.3) { // 30% chance of change
-          const maxChange = Math.floor(spot.total * 0.1); // Max 10% change
-          const change = Math.floor(Math.random() * maxChange * 2) - maxChange;
-          const newAvailable = Math.max(0, Math.min(spot.total, spot.available + change));
-          
-          return {
-            ...spot,
-            available: newAvailable,
-            lastChanged: "Just now",
-            trend: change > 0 ? "increasing" : change < 0 ? "decreasing" : "stable",
-          };
-        }
-        return spot;
-      }));
+      if (spacesError) throw spacesError;
+
+      // 2. Get currently active bookings
+      const now = new Date().toISOString();
+      const { data: activeBookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select('space_id')
+        .in('status', ['confirmed', 'active'])
+        .lte('start_time', now)
+        .gte('end_time', now);
+
+      if (bookingsError) throw bookingsError;
+
+      // 3. Process data
+      const processedData = (spaces || []).map(spot => {
+        const spotActiveBookings = activeBookings?.filter(b => b.space_id === spot.id).length || 0;
+        const available = Math.max(0, spot.total_spots - spotActiveBookings);
+
+        // Mock trend logic since we don't have historical data yet
+        const trend = Math.random() > 0.5 ? 'stable' : (Math.random() > 0.5 ? 'decreasing' : 'increasing');
+
+        return {
+          id: spot.id,
+          name: spot.name,
+          location: spot.address,
+          available: available,
+          total: spot.total_spots, // Use total_spots from DB
+          trend: trend,
+          lastChanged: "Just now",
+          price: spot.hourly_rate,
+          status: spot.availability_status === 'available' ? 'operational' : spot.availability_status,
+          peakTime: "12:00 PM - 2:00 PM", // Mock pattern
+          estimatedFull: available === 0 ? "Full" : null,
+        };
+      });
+
+      setParkingData(processedData);
       setLastUpdated(new Date());
-    }, 5000); // Update every 5 seconds
+
+    } catch (error) {
+      console.error('Error fetching real-time availability:', error);
+      toast.error('Failed to update availability data');
+    }
+  };
+
+  // Initial Fetch & Regular Interval (for time-based updates)
+  useEffect(() => {
+    fetchParkingData();
+
+    // Fallback interval just in case real-time misses something or to update "Just now" timestamps
+    const interval = setInterval(() => {
+      if (isLive) fetchParkingData();
+    }, 60000); // 1 minute fallback
 
     return () => clearInterval(interval);
   }, [isLive]);
 
+  // Supabase Real-time Subscriptions
+  useEffect(() => {
+    if (!isLive) return;
+
+    // Subscribe to bookings changes
+    const bookingsSubscription = supabase
+      .channel('realtime-bookings')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        (payload) => {
+          console.log('Real-time booking change:', payload);
+          fetchParkingData(); // Refresh data on any booking change
+          toast.success('Availability updated due to new activity');
+        }
+      )
+      .subscribe();
+
+    // Subscribe to space changes (e.g. owner updates total spots)
+    const spacesSubscription = supabase
+      .channel('realtime-spaces')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'parking_spaces' },
+        (payload) => {
+          console.log('Real-time space change:', payload);
+          fetchParkingData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(bookingsSubscription);
+      supabase.removeChannel(spacesSubscription);
+    };
+  }, [isLive]);
+
   const getAvailabilityPercentage = (available: number, total: number) => {
+    if (total === 0) return 0;
     return Math.round((available / total) * 100);
   };
 
@@ -156,7 +165,7 @@ export function RealTimeAvailabilityPage() {
 
   const totalSpaces = parkingData.reduce((acc, spot) => acc + spot.total, 0);
   const totalAvailable = parkingData.reduce((acc, spot) => acc + spot.available, 0);
-  const overallAvailability = Math.round((totalAvailable / totalSpaces) * 100);
+  const overallAvailability = totalSpaces > 0 ? Math.round((totalAvailable / totalSpaces) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -229,7 +238,7 @@ export function RealTimeAvailabilityPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {parkingData.map((spot) => {
               const percentage = getAvailabilityPercentage(spot.available, spot.total);
-              
+
               return (
                 <Card key={spot.id} className="p-6 hover:shadow-lg transition-shadow duration-200">
                   <div className="flex items-start justify-between mb-4">
@@ -396,7 +405,7 @@ export function RealTimeAvailabilityPage() {
             <h3 className="text-lg font-semibold text-gray-900 mb-4">
               Availability Predictions
             </h3>
-            
+
             <div className="space-y-6">
               {parkingData.slice(0, 3).map((spot) => (
                 <div key={spot.id} className="border-b border-gray-200 pb-6 last:border-b-0">
@@ -404,7 +413,7 @@ export function RealTimeAvailabilityPage() {
                     <h4 className="font-medium text-gray-900">{spot.name}</h4>
                     <Badge variant="outline">{spot.location}</Badge>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="text-center p-3 bg-blue-50 rounded-lg">
                       <div className="text-sm text-blue-600 mb-1">Next Hour</div>

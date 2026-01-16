@@ -1,25 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../contexts/AuthContext";
 import {
   Bell,
   Clock,
   MapPin,
   DollarSign,
-  User,
   Shield,
   CheckCircle,
-  AlertCircle,
   Info,
   X,
   Calendar,
   Building,
   TrendingUp,
-  Users,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { Separator } from "../ui/separator";
-import { ScrollArea } from "../ui/scroll-area";
 
 interface Notification {
   id: string;
@@ -38,108 +35,74 @@ interface NotificationsPageProps {
 export function NotificationsPage({ userRole = "driver" }: NotificationsPageProps) {
   const isHost = userRole === "host";
 
-  const driverNotifications: Notification[] = [
-    {
-      id: "1",
-      type: "booking",
-      title: "Booking Confirmed",
-      message: "Your parking reservation at Central Plaza has been confirmed for today at 2:00 PM",
-      time: "2 minutes ago",
-      isRead: false,
-    },
-    {
-      id: "2",
-      type: "payment",
-      title: "Payment Successful",
-      message: "Payment of $12.50 has been processed successfully via bKash",
-      time: "1 hour ago",
-      isRead: false,
-    },
-    {
-      id: "3",
-      type: "system",
-      title: "New Feature Available",
-      message: "Smart Search with AI recommendations is now available. Try it out!",
-      time: "3 hours ago",
-      isRead: true,
-      actionRequired: true,
-    },
-    {
-      id: "4",
-      type: "security",
-      title: "Login from New Device",
-      message: "We detected a login from a new device. If this wasn't you, please secure your account.",
-      time: "1 day ago",
-      isRead: true,
-      actionRequired: true,
-    },
-    {
-      id: "5",
-      type: "booking",
-      title: "Booking Reminder",
-      message: "Your parking reservation at Downtown Garage expires in 30 minutes",
-      time: "2 days ago",
-      isRead: true,
-    },
-  ];
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
-  const hostNotifications: Notification[] = [
-    {
-      id: "1",
-      type: "booking_request",
-      title: "New Booking Request",
-      message: "John Smith requested to book Downtown Garage Spot A for 3 hours starting today at 2:00 PM",
-      time: "5 minutes ago",
-      isRead: false,
-      actionRequired: true,
-    },
-    {
-      id: "2",
-      type: "earnings",
-      title: "Payment Received",
-      message: "You received $24.00 from Sarah Johnson's booking at Residential Driveway",
-      time: "1 hour ago",
-      isRead: false,
-    },
-    {
-      id: "3",
-      type: "booking_request",
-      title: "Booking Request Pending",
-      message: "Maria Garcia wants to book Shopping Mall Spot for 2.5 hours tomorrow at 10:00 AM",
-      time: "2 hours ago",
-      isRead: false,
-      actionRequired: true,
-    },
-    {
-      id: "4",
-      type: "space_verification",
-      title: "Space Verified",
-      message: "Your new parking space 'Downtown Garage Spot B' has been verified and is now active",
-      time: "1 day ago",
-      isRead: true,
-    },
-    {
-      id: "5",
-      type: "earnings",
-      title: "Monthly Earnings Summary",
-      message: "Your earnings for this month: $2,847.00 from 147 bookings across 5 spaces",
-      time: "2 days ago",
-      isRead: true,
-    },
-    {
-      id: "6",
-      type: "system",
-      title: "New Host Feature",
-      message: "Advanced analytics dashboard is now available. Track your space performance in detail!",
-      time: "3 days ago",
-      isRead: true,
-      actionRequired: true,
-    },
-  ];
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
 
-  const [notifications, setNotifications] = useState<Notification[]>(
-    isHost ? hostNotifications : driverNotifications
-  );
+      // Subscribe to real-time changes
+      const channel = supabase
+        .channel('public:notifications')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
+        }, () => {
+          fetchNotifications();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user]);
+
+  const fetchNotifications = async () => {
+    if (!user) return;
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Map DB fields to component interface
+      const mapped: Notification[] = (data || []).map(n => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        time: formatNotificationTime(n.created_at),
+        isRead: n.is_read,
+        actionRequired: n.action_required
+      }));
+
+      setNotifications(mapped);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatNotificationTime = (timestamp: string) => {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return "just now";
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    return date.toLocaleDateString();
+  };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
@@ -183,27 +146,68 @@ export function NotificationsPage({ userRole = "driver" }: NotificationsPageProp
     }
   };
 
-  const markAsRead = (id: string) => {
-    setNotifications(prev => 
-      prev.map(notification => 
-        notification.id === id 
-          ? { ...notification, isRead: true }
-          : notification
-      )
-    );
+  const markAsRead = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setNotifications(prev =>
+        prev.map(notification =>
+          notification.id === id
+            ? { ...notification, isRead: true }
+            : notification
+        )
+      );
+    } catch (error) {
+      console.error('Error marking as read:', error);
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => 
-      prev.map(notification => ({ ...notification, isRead: true }))
-    );
+  const markAllAsRead = async () => {
+    if (!user) return;
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setNotifications(prev =>
+        prev.map(notification => ({ ...notification, isRead: true }))
+      );
+    } catch (error) {
+      console.error('Error marking all as read:', error);
+    }
   };
 
-  const deleteNotification = (id: string) => {
-    setNotifications(prev => prev.filter(notification => notification.id !== id));
+  const deleteNotification = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      setNotifications(prev => prev.filter(notification => notification.id !== id));
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+    }
   };
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  if (loading && notifications.length === 0) {
+    return (
+      <div className="min-h-screen pt-20 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 pt-20">
@@ -218,7 +222,7 @@ export function NotificationsPage({ userRole = "driver" }: NotificationsPageProp
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">Notifications</h1>
                 <p className="text-gray-600">
-                  {isHost 
+                  {isHost
                     ? "Stay updated with booking requests, earnings, and space activity"
                     : "Stay updated with your latest activity"
                   }
@@ -299,8 +303,8 @@ export function NotificationsPage({ userRole = "driver" }: NotificationsPageProp
                               <Clock className="w-3 h-3" />
                               {notification.time}
                             </div>
-                            <Badge 
-                              variant="secondary" 
+                            <Badge
+                              variant="secondary"
                               className="text-xs capitalize"
                             >
                               {notification.type}

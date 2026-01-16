@@ -1,72 +1,182 @@
-import { DollarSign, TrendingUp, TrendingDown, Calendar, Download, Eye, Car, MapPin, ArrowUpRight, BarChart3, PieChart } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { DollarSign, TrendingUp, Calendar, Download, Car, ArrowUpRight, BarChart3 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface EarningsPageProps {
   onNavigate?: (page: string) => void;
 }
 
 export function EarningsPage({ onNavigate }: EarningsPageProps) {
-  const earningsData = {
-    today: 152.75,
-    thisWeek: 1043.50,
-    thisMonth: 4267.80,
-    total: 15432.25,
-    pendingWithdrawal: 890.25
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [earningsData, setEarningsData] = useState({
+    today: 0,
+    thisWeek: 0,
+    thisMonth: 0,
+    total: 0,
+    pendingWithdrawal: 0
+  });
+  const [recentEarnings, setRecentEarnings] = useState<any[]>([]);
+  const [monthlyStats, setMonthlyStats] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      fetchEarningsData();
+    }
+  }, [user]);
+
+  const fetchEarningsData = async () => {
+    try {
+      // Get owner's parking spaces
+      const { data: spaces, error: spacesError } = await supabase
+        .from('parking_spaces')
+        .select('id')
+        .eq('owner_id', user!.id);
+
+      if (spacesError) throw spacesError;
+
+      const spaceIds = spaces?.map(s => s.id) || [];
+
+      if (spaceIds.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      // Fetch all confirmed bookings
+      const { data: bookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          parking_spaces!space_id (name)
+        `)
+        .in('space_id', spaceIds)
+        .eq('status', 'confirmed')
+        .order('created_at', { ascending: false });
+
+      if (bookingsError) throw bookingsError;
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      let todayEarnings = 0;
+      let weekEarnings = 0;
+      let monthEarnings = 0;
+      let totalEarnings = 0;
+
+      // Calculate earnings
+      bookings?.forEach((booking: any) => {
+        const bookingDate = new Date(booking.created_at);
+        const amount = parseFloat(booking.total_price) || 0;
+
+        totalEarnings += amount;
+
+        if (bookingDate >= today) {
+          todayEarnings += amount;
+        }
+
+        if (bookingDate >= weekAgo) {
+          weekEarnings += amount;
+        }
+
+        if (bookingDate >= monthStart) {
+          monthEarnings += amount;
+        }
+      });
+
+      setEarningsData({
+        today: todayEarnings,
+        thisWeek: weekEarnings,
+        thisMonth: monthEarnings,
+        total: totalEarnings,
+        pendingWithdrawal: totalEarnings * 0.9 // Assuming 10% platform fee
+      });
+
+      // Format recent earnings
+      const recent = bookings?.slice(0, 10).map((booking: any) => ({
+        id: booking.id,
+        space: booking.parking_spaces?.name || 'Unknown Space',
+        customer: 'Driver',
+        amount: parseFloat(booking.total_price) || 0,
+        duration: `${Math.ceil((new Date(booking.end_time).getTime() - new Date(booking.start_time).getTime()) / (1000 * 60 * 60))} hours`,
+        date: new Date(booking.created_at).toLocaleString(),
+        status: 'completed',
+        vehicle: booking.vehicle_type || 'Car'
+      })) || [];
+
+      setRecentEarnings(recent);
+
+      // Calculate monthly stats (last 6 months)
+      const monthlyData: any = {};
+      bookings?.forEach((booking: any) => {
+        const date = new Date(booking.created_at);
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+        if (!monthlyData[monthKey]) {
+          monthlyData[monthKey] = {
+            earnings: 0,
+            bookings: 0
+          };
+        }
+
+        monthlyData[monthKey].earnings += parseFloat(booking.total_price) || 0;
+        monthlyData[monthKey].bookings += 1;
+      });
+
+      // Convert to array and sort by date (most recent first)
+      const monthlyArray = Object.keys(monthlyData)
+        .sort((a, b) => b.localeCompare(a))
+        .slice(0, 6)
+        .map((monthKey, index, arr) => {
+          const [year, month] = monthKey.split('-');
+          const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+          // Calculate change from previous month
+          let change = '+0%';
+          if (index < arr.length - 1) {
+            const prevMonthKey = arr[index + 1];
+            const prevEarnings = monthlyData[prevMonthKey].earnings;
+            const currentEarnings = monthlyData[monthKey].earnings;
+
+            if (prevEarnings > 0) {
+              const percentChange = ((currentEarnings - prevEarnings) / prevEarnings * 100).toFixed(1);
+              change = `${parseFloat(percentChange) >= 0 ? '+' : ''}${percentChange}%`;
+            }
+          }
+
+          return {
+            month: monthName,
+            earnings: monthlyData[monthKey].earnings,
+            bookings: monthlyData[monthKey].bookings,
+            change
+          };
+        });
+
+      setMonthlyStats(monthlyArray);
+    } catch (error) {
+      console.error('Error fetching earnings:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const recentEarnings = [
-    {
-      id: 1,
-      space: "Central Plaza Garage",
-      customer: "John D.",
-      amount: 12.50,
-      duration: "2.5 hours",
-      date: "Today 2:30 PM",
-      status: "completed",
-      vehicle: "Car"
-    },
-    {
-      id: 2,
-      space: "Mall Parking Lot",
-      customer: "Sarah M.",
-      amount: 8.75,
-      duration: "1.75 hours",
-      date: "Today 11:15 AM",
-      status: "completed",
-      vehicle: "SUV"
-    },
-    {
-      id: 3,
-      space: "Central Plaza Garage",
-      customer: "Mike R.",
-      amount: 25.00,
-      duration: "5 hours",
-      date: "Yesterday 3:45 PM",
-      status: "completed",
-      vehicle: "Truck"
-    },
-    {
-      id: 4,
-      space: "Office Complex",
-      customer: "Lisa K.",
-      amount: 15.00,
-      duration: "3 hours",
-      date: "Yesterday 9:20 AM",
-      status: "pending",
-      vehicle: "Car"
-    }
-  ];
-
-  const monthlyStats = [
-    { month: "Dec 2024", earnings: 4267.80, bookings: 89, change: "+12%" },
-    { month: "Nov 2024", earnings: 3804.25, bookings: 76, change: "+8%" },
-    { month: "Oct 2024", earnings: 3521.60, bookings: 72, change: "+15%" },
-    { month: "Sep 2024", earnings: 3067.40, bookings: 68, change: "+5%" },
-  ];
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto px-6 py-8 flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading earnings data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">{/* Modern desktop layout */}
@@ -103,7 +213,7 @@ export function EarningsPage({ onNavigate }: EarningsPageProps) {
             </div>
           </div>
         </Card>
-        
+
         <Card className="bg-gradient-to-br from-green-500 to-emerald-600 text-white p-8 hover-lift professional-shadow-xl border-0 relative overflow-hidden animate-slide-in-right">
           <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full translate-y-12 -translate-x-12"></div>
           <div className="relative z-10">
@@ -193,7 +303,7 @@ export function EarningsPage({ onNavigate }: EarningsPageProps) {
                   <div className="text-right">
                     <div className="font-semibold text-gray-900">${earning.amount.toFixed(2)}</div>
                     <div className="text-sm text-gray-500">{earning.duration}</div>
-                    <Badge 
+                    <Badge
                       variant={earning.status === 'completed' ? 'secondary' : 'outline'}
                       className={earning.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}
                     >
@@ -207,29 +317,45 @@ export function EarningsPage({ onNavigate }: EarningsPageProps) {
         </TabsContent>
 
         <TabsContent value="monthly" className="space-y-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Monthly Cumulative Earnings</h3>
+            <Badge className="bg-purple-100 text-purple-700 border-purple-200">
+              Last 6 Months
+            </Badge>
+          </div>
           <div className="space-y-3">
-            {monthlyStats.map((stat, index) => (
-              <Card key={index} className="bg-white/80 backdrop-blur-sm border-white/20 p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-gradient-to-r from-purple-100 to-blue-100 rounded-lg flex items-center justify-center">
-                      <Calendar className="w-5 h-5 text-purple-600" />
+            {monthlyStats.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">No monthly data available</div>
+            ) : (
+              monthlyStats.map((stat, index) => (
+                <Card key={index} className="bg-white/80 backdrop-blur-sm border-white/20 p-5 hover:shadow-lg transition-shadow">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-gradient-to-r from-purple-100 to-blue-100 rounded-xl flex items-center justify-center">
+                        <Calendar className="w-6 h-6 text-purple-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900 text-lg">{stat.month}</h4>
+                        <p className="text-sm text-gray-600">{stat.bookings} confirmed bookings</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="outline" className="text-xs">
+                            Monthly Total
+                          </Badge>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-medium text-gray-900">{stat.month}</h4>
-                      <p className="text-sm text-gray-600">{stat.bookings} bookings</p>
+                    <div className="text-right">
+                      <div className="font-bold text-2xl text-gray-900 mb-1">${stat.earnings.toFixed(2)}</div>
+                      <div className="flex items-center gap-1 justify-end">
+                        <TrendingUp className="w-4 h-4 text-green-500" />
+                        <span className="text-sm font-medium text-green-600">{stat.change}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">vs previous month</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-gray-900">${stat.earnings.toFixed(2)}</div>
-                    <div className="flex items-center gap-1">
-                      <TrendingUp className="w-3 h-3 text-green-500" />
-                      <span className="text-sm text-green-600">{stat.change}</span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              ))
+            )}
           </div>
         </TabsContent>
       </Tabs>
@@ -244,8 +370,8 @@ export function EarningsPage({ onNavigate }: EarningsPageProps) {
             <h3 className="font-semibold text-blue-800">Ready to Withdraw</h3>
             <p className="text-sm text-blue-700">${earningsData.pendingWithdrawal.toFixed(2)} available for withdrawal to your mobile wallet</p>
           </div>
-          <Button 
-            size="sm" 
+          <Button
+            size="sm"
             className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 hover:scale-110 hover:shadow-lg transition-all duration-300 cursor-pointer"
             onClick={() => onNavigate?.('withdrawal')}
           >

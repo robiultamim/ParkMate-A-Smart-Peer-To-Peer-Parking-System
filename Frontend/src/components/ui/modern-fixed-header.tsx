@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "../../lib/supabase";
 import {
   Search,
   MapPin,
   Menu,
   User,
-  Heart,
   Settings,
   CreditCard,
   Timer,
@@ -22,11 +22,8 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "./button";
-import { Card } from "./card";
 import { Badge } from "./badge";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
-import { Separator } from "./separator";
-import { ScrollArea } from "./scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,8 +50,41 @@ export function ModernFixedHeader({
   onLogout,
 }: ModernFixedHeaderProps) {
   const { profile, user } = useAuth(); // Get real user data
-  const [notificationCount] = useState(3);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchUnreadCount = async () => {
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
+
+      if (!error && count !== null) setNotificationCount(count);
+    };
+
+    fetchUnreadCount();
+
+    // Subscribe to changes
+    const channel = supabase
+      .channel('header-notifications')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`
+      }, () => {
+        fetchUnreadCount();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const getUserInfo = () => {
     if (profile) {
@@ -253,30 +283,6 @@ export function ModernFixedHeader({
 
             {/* Right Section - Enhanced Profile & Notifications */}
             <div className="flex items-center gap-3 animate-slide-in-right">
-              {/* Quick Actions - Only show for drivers */}
-              {userRole !== 'host' && (
-                <div className="hidden lg:flex items-center gap-1 bg-gray-50 rounded-full p-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full hover:bg-white hover:shadow-sm transition-all duration-200"
-                    onClick={() => onNavigate("search")}
-                    title="Quick Search"
-                  >
-                    <Search className="w-4 h-4 text-gray-500" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full hover:bg-white hover:shadow-sm transition-all duration-200"
-                    onClick={() => onNavigate("favorites")}
-                    title="Favorites"
-                  >
-                    <Heart className="w-4 h-4 text-gray-500" />
-                  </Button>
-                </div>
-              )}
-
               {/* Enhanced Notifications */}
               <Button
                 variant="ghost"

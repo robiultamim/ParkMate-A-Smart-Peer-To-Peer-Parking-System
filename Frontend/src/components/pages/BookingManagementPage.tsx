@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
 import { Clock, CheckCircle, XCircle, MapPin, Car, User, Phone, Star, Timer } from 'lucide-react';
+import { createNotification } from '../../lib/notifications';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -62,7 +63,7 @@ export function BookingManagementPage() {
     }
   };
 
-  const handleBookingAction = async (bookingId: number, action: 'approve' | 'reject') => {
+  const handleBookingAction = async (bookingId: string, action: 'approve' | 'reject') => {
     const status = action === 'approve' ? 'confirmed' : 'rejected';
 
     // Optimistic update
@@ -75,6 +76,18 @@ export function BookingManagementPage() {
         .eq('id', bookingId);
 
       if (error) throw error;
+
+      const booking = bookings.find(b => b.id === bookingId);
+      if (booking?.driver_id) {
+        await createNotification({
+          userId: booking.driver_id,
+          title: action === 'approve' ? 'Booking Confirmed! 🎉' : 'Booking Declined',
+          message: action === 'approve'
+            ? `Your request for ${booking.parking_spaces?.name || 'the parking spot'} has been approved.`
+            : `Sorry, your request for ${booking.parking_spaces?.name || 'the parking spot'} was declined by the owner.`,
+          type: 'booking'
+        });
+      }
 
       toast.success(`Booking ${action}d successfully`);
     } catch (error) {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../contexts/AuthContext";
 import {
   Search,
   MapPin,
@@ -14,7 +15,7 @@ import {
   Shield,
   Wifi,
   Camera,
-  Accessibility,
+  Accessibility
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -30,6 +31,7 @@ interface SmartSearchPageProps {
 }
 
 export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [priceRange, setPriceRange] = useState([0, 50]);
   const [maxDistance, setMaxDistance] = useState([2]);
@@ -37,12 +39,48 @@ export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState("distance");
 
+  const [appliedFilters, setAppliedFilters] = useState({
+    vehicleType: "car",
+    priceRange: [0, 50],
+    maxDistance: [2],
+    amenities: [] as string[],
+    sortBy: "distance"
+  });
+
   const [spots, setSpots] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userBookings, setUserBookings] = useState<any[]>([]);
+  const [activeBookings, setActiveBookings] = useState<any[]>([]);
 
   useEffect(() => {
-    fetchSpots();
-  }, []);
+    fetchData();
+    const spacesSub = supabase
+      .channel('search-spaces')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_spaces' }, () => fetchData())
+      .subscribe();
+
+    const bookingsSub = supabase
+      .channel('search-bookings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchData())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(spacesSub);
+      supabase.removeChannel(bookingsSub);
+    };
+  }, [user]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchSpots(),
+      fetchActiveBookings()
+    ]);
+    if (user) {
+      await fetchUserBookings();
+    }
+    setLoading(false);
+  };
 
   const fetchSpots = async () => {
     try {
@@ -60,26 +98,116 @@ export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
     }
   };
 
+  const fetchActiveBookings = async () => {
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('space_id, status')
+        .in('status', ['pending', 'confirmed'])
+        .lte('start_time', now)
+        .gte('end_time', now);
+
+      if (error) throw error;
+      setActiveBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching active bookings:', error);
+    }
+  };
+
+  const fetchUserBookings = async () => {
+    if (!user) return;
+
+    try {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('space_id, status')
+        .eq('driver_id', user.id)
+        .in('status', ['pending', 'confirmed'])
+        .gte('end_time', now);
+
+      if (error) throw error;
+      setUserBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching user bookings:', error);
+    }
+  };
+
+  const getBookingStatus = (spaceId: string) => {
+    const booking = userBookings.find(b => b.space_id === spaceId);
+    return booking?.status || null;
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedFilters({
+      vehicleType: selectedVehicleType,
+      priceRange,
+      maxDistance,
+      amenities: selectedAmenities,
+      sortBy
+    });
+  };
+
   const filteredSpots = spots.filter(spot => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return spot.name.toLowerCase().includes(q) || spot.address.toLowerCase().includes(q);
+    // 1. Search Query
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (!spot.name.toLowerCase().includes(q) && !spot.address.toLowerCase().includes(q)) {
+        return false;
+      }
+    }
+
+    // 2. Vehicle Type
+    if (appliedFilters.vehicleType && spot.space_type) {
+      if (appliedFilters.vehicleType === 'bike' && spot.space_type !== 'motorcycle') return false;
+      if (appliedFilters.vehicleType === 'truck' && spot.space_type !== 'truck') return false;
+    }
+
+    // 3. Price Range
+    const price = spot.hourly_rate || 0;
+    if (price < appliedFilters.priceRange[0] || price > appliedFilters.priceRange[1]) {
+      return false;
+    }
+
+    // 4. Amenities
+    if (appliedFilters.amenities.length > 0) {
+      const spotAmenities = spot.amenities || [];
+      const hasAll = appliedFilters.amenities.every(a => spotAmenities.includes(a));
+      if (!hasAll) return false;
+    }
+
+    return true;
+  }).sort((a, b) => {
+    switch (appliedFilters.sortBy) {
+      case 'price-low':
+        return (a.hourly_rate || 0) - (b.hourly_rate || 0);
+      case 'price-high':
+        return (b.hourly_rate || 0) - (a.hourly_rate || 0);
+      default:
+        return 0;
+    }
   });
 
-  const parkingResults = filteredSpots.map(spot => ({
-    id: spot.id,
-    name: spot.name,
-    address: spot.address,
-    distance: 0.5,
-    price: spot.hourly_rate || 0,
-    rating: 4.8,
-    reviews: 12,
-    available: spot.total_spots || 1,
-    total: spot.total_spots || 1,
-    type: spot.space_type || "Standard",
-    amenities: spot.amenities || [],
-    image: spot.photos && spot.photos.length > 0 ? spot.photos[0] : "/api/placeholder/300/200",
-  }));
+  const parkingResults = filteredSpots.map(spot => {
+    const occupantCount = activeBookings.filter(b => b.space_id === spot.id).length;
+    const currentAvailable = Math.max(0, (spot.total_spots || 1) - occupantCount);
+
+    return {
+      id: spot.id,
+      name: spot.name,
+      address: spot.address,
+      distance: 0.5,
+      price: spot.hourly_rate || 0,
+      rating: 4.8,
+      reviews: 12,
+      available: currentAvailable,
+      total: spot.total_spots || 1,
+      type: spot.space_type || "Standard",
+      amenities: spot.amenities || [],
+      image: spot.photos && spot.photos.length > 0 ? spot.photos[0] : "/api/placeholder/300/200",
+    };
+  });
 
   const amenityIcons: Record<string, any> = {
     covered: Shield,
@@ -290,7 +418,10 @@ export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
                 </Select>
               </div>
 
-              <Button className="w-full bg-gradient-to-r from-purple-600 to-blue-600">
+              <Button
+                className="w-full bg-gradient-to-r from-purple-600 to-blue-600"
+                onClick={handleApplyFilters}
+              >
                 Apply Filters
               </Button>
             </div>
@@ -404,14 +535,34 @@ export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
                         </div>
 
                         <div className="space-y-2">
-                          <Button
-                            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-                            onClick={() => onNavigate?.('book-now', { id: spot.id })}
-                          >
-                            <Clock className="w-4 h-4 mr-2" />
-                            Book Now
-                          </Button>
-                          <Button variant="outline" className="w-full">
+                          {(() => {
+                            const bookingStatus = getBookingStatus(spot.id);
+                            if (bookingStatus === 'pending') {
+                              return (
+                                <Badge className="w-full bg-orange-100 text-orange-700 border-orange-200 px-4 py-3 justify-center">
+                                  <Clock className="w-4 h-4 mr-2" />
+                                  Pending Approval
+                                </Badge>
+                              );
+                            } else if (bookingStatus === 'confirmed') {
+                              return (
+                                <Badge className="w-full bg-green-100 text-green-700 border-green-200 px-4 py-3 justify-center">
+                                  Confirmed
+                                </Badge>
+                              );
+                            } else {
+                              return (
+                                <Button
+                                  className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                                  onClick={() => onNavigate?.('book-now', { id: spot.id })}
+                                >
+                                  <Clock className="w-4 h-4 mr-2" />
+                                  Book Now
+                                </Button>
+                              );
+                            }
+                          })()}
+                          <Button variant="outline" className="w-full" onClick={() => onNavigate?.('map')}>
                             <MapPin className="w-4 h-4 mr-2" />
                             View on Map
                           </Button>
@@ -432,7 +583,7 @@ export function SmartSearchPage({ onNavigate }: SmartSearchPageProps) {
                 <p className="text-gray-600 mb-4">
                   View all parking spots on an interactive map with real-time availability
                 </p>
-                <Button className="bg-gradient-to-r from-purple-600 to-blue-600">
+                <Button className="bg-gradient-to-r from-purple-600 to-blue-600" onClick={() => onNavigate?.('map')}>
                   Load Map View
                 </Button>
               </Card>

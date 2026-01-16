@@ -1,24 +1,5 @@
 import { useState, useEffect } from "react";
 import { BookNowPage } from "./components/pages/BookNowPage";
-import {
-  Search,
-  MapPin,
-  Clock,
-  Star,
-  Menu,
-  User,
-  Heart,
-  Settings,
-  Filter,
-  CreditCard,
-  Timer,
-  Shield,
-  Users,
-  DollarSign,
-  Plus,
-  Car,
-  ArrowRight,
-} from "lucide-react";
 import { ModernFixedHeader } from "./components/ui/modern-fixed-header";
 import { SmartSearchPage } from "./components/pages/SmartSearchPage";
 import { RealTimeAvailabilityPage } from "./components/pages/RealTimeAvailabilityPage";
@@ -37,7 +18,6 @@ import { UserManagementPage } from "./components/pages/UserManagementPage";
 import { SpaceOwnerDashboard } from "./components/pages/SpaceOwnerDashboard";
 import { AddSpacePage } from "./components/pages/AddSpacePage";
 import { EarningsPage } from "./components/pages/EarningsPage";
-import { BookingManagementPage } from "./components/pages/BookingManagementPage";
 import { WithdrawalPage } from "./components/pages/WithdrawalPage";
 import { VehiclePricingPage } from "./components/pages/VehiclePricingPage";
 import { AdminDashboard } from "./components/pages/AdminDashboard";
@@ -61,8 +41,9 @@ export default function App() {
     const savedRole = localStorage.getItem('activeUserRole');
     return (savedRole as "driver" | "host" | "admin") || "driver";
   });
-  const [isLoading, setIsLoading] = useState(false);
   const [selectedSpotId, setSelectedSpotId] = useState<string | undefined>(undefined);
+  const [selectedBookingId, setSelectedBookingId] = useState<string | undefined>(undefined);
+
   // Sync userRole with currentPage to ensure header matches content
   useEffect(() => {
     const hostPages = ['host-dashboard', 'add-space', 'earnings', 'bookings-manage', 'withdrawal', 'vehicle-pricing'];
@@ -140,23 +121,6 @@ export default function App() {
     }
   }, [isAuthenticated, authLoading, profile]);
 
-  // Handle role changes and redirect to appropriate dashboard
-  const handleUserRoleChange = (role: "driver" | "host" | "admin") => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setUserRole(role);
-      // Redirect to appropriate dashboard based on role
-      if (role === "driver") {
-        setCurrentPage("find");
-      } else if (role === "host") {
-        setCurrentPage("host-dashboard");
-      } else if (role === "admin") {
-        setCurrentPage("admin");
-      }
-      setIsLoading(false);
-    }, 800);
-  };
-
   // Handle authentication (called after successful login/signup)
   const handleLogin = (credentials: { email: string; password: string; rememberMe: boolean; userRole?: 'driver' | 'host' | 'admin' }) => {
     // User is already authenticated via AuthContext, just redirect based on role
@@ -230,8 +194,8 @@ export default function App() {
           <div className="bg-gray-100 p-4 rounded mb-4">
             <p className="text-sm font-mono text-gray-800 mb-2">Add these to your .env file:</p>
             <pre className="text-xs text-gray-700 whitespace-pre-wrap">
-              {`VITE_SUPABASE_URL=https://tuogbwilzwsoizxlgfhq.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
+              {`VITE_SUPABASE_URL=${supabaseUrl || 'https://tuogbwilzwsoizxlgfhq.supabase.co'}
+VITE_SUPABASE_ANON_KEY=${supabaseKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'}`}
             </pre>
           </div>
           <p className="text-sm text-gray-600 mb-4">
@@ -308,17 +272,14 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
     }
   }
 
-
-
   // Handle special page navigation
   const handleSpecialPageNavigation = (page: string, params?: any) => {
     if (page === 'book-now' && params?.id) {
       setSelectedSpotId(params.id);
+      setSelectedBookingId(params.bookingId); // Store bookingId for modification
     }
     setCurrentPage(page);
   };
-
-
 
   // Render page content based on currentPage
   const renderPageContent = () => {
@@ -330,7 +291,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
       case "map":
         return <MapPage onNavigate={handleSpecialPageNavigation} />;
       case "bookings":
-        return <BookingsPage />;
+        return <BookingsPage onNavigate={handleSpecialPageNavigation} />;
       case "notifications":
         return <NotificationsPage userRole={userRole} />;
       case "settings":
@@ -368,7 +329,7 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
       case "users":
         return <UserManagementPage />;
       case "book-now":
-        return <BookNowPage spotId={selectedSpotId} onBack={() => handleSpecialPageNavigation('find')} />;
+        return <BookNowPage spotId={selectedSpotId} bookingId={selectedBookingId} onBack={() => handleSpecialPageNavigation('bookings')} />;
       default:
         return renderDashboard();
     }
@@ -383,11 +344,6 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`}
       />
     );
   };
-
-  // Show loading screen during role changes
-  if (isLoading) {
-    return <PageTransitionLoader />;
-  }
 
   // Main authenticated app layout
   return (

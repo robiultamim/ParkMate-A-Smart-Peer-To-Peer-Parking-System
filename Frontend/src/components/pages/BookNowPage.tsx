@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'sonner';
-import { MapPin, Clock, Calendar, CreditCard, Car, Bike, Truck, Star, Info, Check, AlertCircle } from 'lucide-react';
+import { MapPin, CreditCard, Car, Bike, Truck, Star, Info, Check, AlertCircle } from 'lucide-react';
+import { createNotification } from '../../lib/notifications';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -16,11 +17,12 @@ import { Alert, AlertDescription } from '../ui/alert';
 
 interface BookNowPageProps {
   spotId?: string;
+  bookingId?: string;
   onBack?: () => void;
 }
 
-export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
-  const { user } = useAuth();
+export function BookNowPage({ spotId, bookingId, onBack }: BookNowPageProps) {
+  const { user, profile } = useAuth();
   const [selectedVehicle, setSelectedVehicle] = useState('car');
   const [selectedDuration, setSelectedDuration] = useState('2');
   const [paymentMethod, setPaymentMethod] = useState('bkash');
@@ -28,12 +30,16 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
   const [loading, setLoading] = useState(false);
   const [licensePlate, setLicensePlate] = useState('');
   const [startTime, setStartTime] = useState(new Date().toISOString().slice(0, 16));
+  const [isModifying, setIsModifying] = useState(false);
 
 
 
   useEffect(() => {
     fetchSpotDetails();
-  }, [spotId]);
+    if (bookingId) {
+      loadBookingForModification();
+    }
+  }, [spotId, bookingId]);
 
   const fetchSpotDetails = async () => {
     try {
@@ -93,6 +99,34 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
 
   const { subtotal, serviceFee, total } = calculateTotal();
 
+  const loadBookingForModification = async () => {
+    if (!bookingId) return;
+
+    setIsModifying(true);
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('id', bookingId)
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setSelectedVehicle(data.vehicle_type || 'car');
+        setLicensePlate(data.license_plate || '');
+        setStartTime(new Date(data.start_time).toISOString().slice(0, 16));
+
+        // Calculate duration in hours
+        const duration = Math.ceil((new Date(data.end_time).getTime() - new Date(data.start_time).getTime()) / (1000 * 60 * 60));
+        setSelectedDuration(duration.toString());
+      }
+    } catch (error) {
+      console.error('Error loading booking:', error);
+      toast.error('Failed to load booking details');
+    }
+  };
+
   const handleBookNow = async () => {
     if (!user) {
       toast.error('Please login to book a spot');
@@ -121,19 +155,42 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
         payment_status: 'pending'
       };
 
-      const { error } = await supabase
-        .from('bookings')
-        .insert([bookingPayload])
-        .select();
+      if (realSpot?.owner_id) {
+        await createNotification({
+          userId: realSpot.owner_id,
+          title: `New Booking Request: ${spotData.name}`,
+          message: `${profile?.first_name || 'A driver'} has requested a spot for ${selectedDuration} hours with their ${selectedVehicle} (${licensePlate}).`,
+          type: 'booking_request',
+          actionRequired: true,
+          metadata: { bookingId: isModifying ? bookingId : undefined, spotId: spotData.id }
+        });
+      }
 
-      if (error) throw error;
+      if (isModifying && bookingId) {
+        // Update existing booking
+        const { error } = await supabase
+          .from('bookings')
+          .update(bookingPayload)
+          .eq('id', bookingId);
 
-      toast.success('Booking requested successfully! Waiting for owner approval.');
+        if (error) throw error;
+        toast.success('Booking updated successfully! Waiting for owner approval.');
+      } else {
+        // Create new booking
+        const { error } = await supabase
+          .from('bookings')
+          .insert([bookingPayload])
+          .select();
+
+        if (error) throw error;
+        toast.success('Booking requested successfully! Waiting for owner approval.');
+      }
+
       if (onBack) onBack();
 
     } catch (error: any) {
       console.error('Booking error:', error);
-      toast.error(error.message || 'Failed to create booking');
+      toast.error(error.message || `Failed to ${isModifying ? 'update' : 'create'} booking`);
     } finally {
       setLoading(false);
     }
@@ -344,7 +401,7 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Rate</span>
-                <span className="font-medium">${spotData.pricing[selectedVehicle].hourly}/hour</span>
+                <span className="font-medium">${spotData.pricing[selectedVehicle as 'car' | 'bike' | 'truck'].hourly}/hour</span>
               </div>
 
               <Separator />
@@ -439,7 +496,7 @@ export function BookNowPage({ spotId, onBack }: BookNowPageProps) {
               ) : (
                 <>
                   <CreditCard className="w-5 h-5 mr-2" />
-                  Book Now - ${total.toFixed(2)}
+                  {isModifying ? `Update Booking - $${total.toFixed(2)}` : `Book Now - $${total.toFixed(2)}`}
                 </>
               )}
             </Button>

@@ -21,6 +21,7 @@ import {
   Car,
   Trash2
 } from 'lucide-react';
+import { createNotification } from '../../lib/notifications';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -64,6 +65,17 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [pendingBookings, setPendingBookings] = useState<any[]>([]);
+  const [activeBookings, setActiveBookings] = useState<any[]>([]);
+  const [pastBookings, setPastBookings] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    monthlyEarnings: 0,
+    monthlyBookings: 0,
+    earningsChange: '+0%',
+    bookingsChange: '+0%',
+    averageRating: 4.8,
+    activeSpaces: 0
+  });
+  const [spaceStats, setSpaceStats] = useState<Record<string, { earnings: number, bookings: number }>>({});
 
   // Edit form state
   const [editName, setEditName] = useState('');
@@ -163,18 +175,127 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
           amount: `$${b.total_price}`,
           duration: `${Math.ceil((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / (1000 * 60 * 60))} hours`,
           startTime: new Date(b.start_time).toLocaleString(),
-          requestTime: new Date(b.created_at).toLocaleDateString()
+          requestTime: new Date(b.created_at).toLocaleDateString(),
+          driverId: b.driver_id
         };
       });
 
       setPendingBookings(formattedRequests);
+
+      // Fetch active/confirmed bookings
+      const { data: activeBookingsData, error: activeError } = await supabase
+        .from('bookings')
+        .select(`
+            *,
+            parking_spaces!space_id (name)
+          `)
+        .in('space_id', spaceIds)
+        .eq('status', 'confirmed')
+        .order('start_time', { ascending: false });
+
+      if (activeError) throw activeError;
+
+      const activeBookingsRaw = activeBookingsData || [];
+      const activeDriverIds = [...new Set(activeBookingsRaw.map((b: any) => b.driver_id))];
+
+      let activeProfilesMap: Record<string, any> = {};
+
+      if (activeDriverIds.length > 0) {
+        const { data: activeProfilesData } = await supabase
+          .from('user_profiles')
+          .select('user_id, first_name, last_name, phone')
+          .in('user_id', activeDriverIds);
+
+        if (activeProfilesData) {
+          activeProfilesData.forEach((p: any) => {
+            activeProfilesMap[p.user_id] = p;
+          });
+        }
+      }
+
+      const now = new Date();
+      const activeBookingsList: any[] = [];
+      const pastBookingsList: any[] = [];
+
+      activeBookingsRaw.forEach((b: any) => {
+        const profile = activeProfilesMap[b.driver_id];
+        const fullName = profile ? `${profile.first_name} ${profile.last_name}` : 'Unknown User';
+        const endTime = new Date(b.end_time);
+
+        const formattedBooking = {
+          id: b.id,
+          renterName: fullName,
+          renterRating: 5.0, // Placeholder
+          spaceName: b.parking_spaces?.name || 'Unknown Space',
+          vehicleType: b.vehicle_type || 'Car',
+          licensePlate: b.license_plate || 'N/A',
+          amount: `$${b.total_price}`,
+          duration: `${Math.ceil((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / (1000 * 60 * 60))} hours`,
+          startTime: new Date(b.start_time).toLocaleString(),
+          endTime: new Date(b.end_time).toLocaleString(),
+          confirmedTime: new Date(b.updated_at || b.created_at).toLocaleDateString(),
+          rawEndTime: endTime
+        };
+
+        // Separate into active (ongoing) and past based on end time
+        if (endTime > now) {
+          activeBookingsList.push(formattedBooking);
+        } else {
+          pastBookingsList.push(formattedBooking);
+        }
+      });
+
+      setActiveBookings(activeBookingsList);
+      setPastBookings(pastBookingsList);
+
+      // Calculate Metrics
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+      const thisMonthBookingsRaw = activeBookingsRaw.filter(b => new Date(b.created_at) >= startOfMonth);
+      const lastMonthBookingsRaw = activeBookingsRaw.filter(b => {
+        const date = new Date(b.created_at);
+        return date >= startOfLastMonth && date < startOfMonth;
+      });
+
+      const thisMonthEarnings = thisMonthBookingsRaw.reduce((sum, b) => sum + (parseFloat(b.total_price) || 0), 0);
+      const lastMonthEarnings = lastMonthBookingsRaw.reduce((sum, b) => sum + (parseFloat(b.total_price) || 0), 0);
+
+      const earningsChange = lastMonthEarnings > 0
+        ? `${((thisMonthEarnings - lastMonthEarnings) / lastMonthEarnings * 100).toFixed(1)}%`
+        : '+100%';
+
+      const bookingsChange = lastMonthBookingsRaw.length > 0
+        ? `${((thisMonthBookingsRaw.length - lastMonthBookingsRaw.length) / lastMonthBookingsRaw.length * 100).toFixed(1)}%`
+        : '+100%';
+
+      setStats({
+        monthlyEarnings: thisMonthEarnings,
+        monthlyBookings: thisMonthBookingsRaw.length,
+        earningsChange: (earningsChange.startsWith('-') ? '' : '+') + earningsChange,
+        bookingsChange: (bookingsChange.startsWith('-') ? '' : '+') + bookingsChange,
+        averageRating: 4.8,
+        activeSpaces: spaceIds.length
+      });
+
+      // Space specific stats
+      const statsMap: Record<string, { earnings: number, bookings: number }> = {};
+      activeBookingsRaw.forEach(b => {
+        if (!statsMap[b.space_id]) statsMap[b.space_id] = { earnings: 0, bookings: 0 };
+        statsMap[b.space_id].earnings += (parseFloat(b.total_price) || 0);
+        statsMap[b.space_id].bookings += 1;
+      });
+      setSpaceStats(statsMap);
+
     } catch (err) {
       console.error('Error fetching pending bookings:', err);
     }
   };
 
-  const handleBookingAction = async (bookingId: number, action: 'approve' | 'reject') => {
+  const handleBookingAction = async (bookingId: string, action: 'approve' | 'reject') => {
     const status = action === 'approve' ? 'confirmed' : 'rejected';
+
+    const booking = pendingBookings.find(b => b.id === bookingId);
 
     // Optimistic update
     setPendingBookings(prev => prev.filter(b => b.id !== bookingId));
@@ -186,6 +307,17 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
         .eq('id', bookingId);
 
       if (error) throw error;
+
+      if (booking?.driverId) {
+        await createNotification({
+          userId: booking.driverId,
+          title: action === 'approve' ? 'Booking Confirmed! 🎉' : 'Booking Declined',
+          message: action === 'approve'
+            ? `Your request for ${booking.spaceName || 'the parking spot'} has been approved.`
+            : `Sorry, your request for ${booking.spaceName || 'the parking spot'} was declined by the owner.`,
+          type: 'booking'
+        });
+      }
 
       toast.success(`Booking ${action}d successfully`);
       // Refresh to ensure sync
@@ -314,10 +446,10 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
     {
       id: 'monthly',
       title: 'Monthly Earnings',
-      value: '$2,847',
-      change: '+$324',
-      changeType: 'increase',
-      percentage: '+12.8%',
+      value: `$${stats.monthlyEarnings.toFixed(2)}`,
+      change: stats.earningsChange,
+      changeType: stats.earningsChange.startsWith('-') ? 'decrease' : 'increase',
+      percentage: stats.earningsChange,
       icon: DollarSign,
       color: 'from-green-500 to-emerald-500',
       bgColor: 'from-green-50 to-emerald-100',
@@ -326,10 +458,10 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
     {
       id: 'spaces',
       title: 'Active Spaces',
-      value: spaces.length.toString(),
-      change: '+1',
+      value: stats.activeSpaces.toString(),
+      change: '+0',
       changeType: 'increase',
-      percentage: '+25%',
+      percentage: '+0%',
       icon: MapPin,
       color: 'from-blue-500 to-blue-600',
       bgColor: 'from-blue-50 to-blue-100',
@@ -338,10 +470,10 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
     {
       id: 'bookings',
       title: 'This Month\'s Bookings',
-      value: '147',
-      change: '+23',
-      changeType: 'increase',
-      percentage: '+18.5%',
+      value: stats.monthlyBookings.toString(),
+      change: stats.bookingsChange,
+      changeType: stats.bookingsChange.startsWith('-') ? 'decrease' : 'increase',
+      percentage: stats.bookingsChange,
       icon: Calendar,
       color: 'from-purple-500 to-purple-600',
       bgColor: 'from-purple-50 to-purple-100',
@@ -350,10 +482,10 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
     {
       id: 'rating',
       title: 'Average Rating',
-      value: '4.8',
-      change: '+0.2',
+      value: stats.averageRating.toString(),
+      change: '+0.0',
       changeType: 'increase',
-      percentage: '+4.3%',
+      percentage: '+0%',
       icon: Star,
       color: 'from-yellow-500 to-orange-500',
       bgColor: 'from-yellow-50 to-orange-100',
@@ -365,37 +497,64 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
      Map fetched spaces to UI model. 
      Supabase columns: name, address, space_type, hourly_rate, availability_status, photos 
   */
-  const parkingSpaces = spaces.map(space => ({
-    id: space.id,
-    name: space.name,
-    type: space.space_type || 'Parking Space',
-    location: space.address,
-    pricing: {
-      car: space.hourly_rate ? `$${space.hourly_rate} /hr` : 'N/A',
-      bike: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A',
-      truck: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A'
-    },
-    availability: space.availability_status === 'available' ? 'Available' : 'Occupied',
-    occupancy: 0, // mock
-    earnings: '$0', // mock
-    bookings: 0, // mock
-    rating: 5.0, // mock
-    status: 'active',
-    images: space.photos ? space.photos.length : 0,
-    imageUrl: space.photos && space.photos.length > 0 ? space.photos[0] : null,
-    lastBooked: 'Never',
-    raw: space
-  }));
+  const parkingSpaces = spaces.map(space => {
+    const sMetric = spaceStats[space.id] || { earnings: 0, bookings: 0 };
+    return {
+      id: space.id,
+      name: space.name,
+      type: space.space_type || 'Parking Space',
+      location: space.address,
+      pricing: {
+        car: space.hourly_rate ? `$${space.hourly_rate} /hr` : 'N/A',
+        bike: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A',
+        truck: space.hourly_rate ? `$${space.hourly_rate}/hr` : 'N/A'
+      },
+      availability: space.availability_status === 'available' ? 'Available' : 'Occupied',
+      occupancy: sMetric.bookings > 0 ? Math.min(100, (sMetric.bookings * 10)) : 0, // Mock occupancy based on bookings
+      earnings: `$${sMetric.earnings.toFixed(2)}`,
+      bookings: sMetric.bookings,
+      rating: 5.0,
+      status: 'active',
+      images: space.photos ? space.photos.length : 0,
+      imageUrl: space.photos && space.photos.length > 0 ? space.photos[0] : null,
+      lastBooked: sMetric.bookings > 0 ? 'Recently' : 'Never',
+      raw: space
+    };
+  });
 
 
 
-  const recentEarnings = [
-    { date: 'Today', amount: '$47.50', bookings: 8 },
-    { date: 'Yesterday', amount: '$89.25', bookings: 12 },
-    { date: '2 days ago', amount: '$62.00', bookings: 9 },
-    { date: '3 days ago', amount: '$75.80', bookings: 11 },
-    { date: '4 days ago', amount: '$53.40', bookings: 7 }
-  ];
+  const getRecentDailyEarnings = () => {
+    const dailyMap: Record<string, { amount: number, bookings: number }> = {};
+    const now = new Date();
+
+    // Initialize last 5 days
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const label = i === 0 ? 'Today' : i === 1 ? 'Yesterday' : `${i} days ago`;
+      dailyMap[d.toLocaleDateString()] = { amount: 0, bookings: 0, label } as any;
+    }
+
+    [...activeBookings, ...pastBookings].forEach(b => {
+      // formatted bookings use confirmedTime for display which is toLocaleDateString
+      const date = b.confirmedTime;
+      const amountValue = parseFloat(b.amount.replace('$', '')) || 0;
+
+      if (dailyMap[date]) {
+        dailyMap[date].amount += amountValue;
+        dailyMap[date].bookings += 1;
+      }
+    });
+
+    return Object.values(dailyMap).map((v: any) => ({
+      date: v.label,
+      amount: `$${v.amount.toFixed(2)}`,
+      bookings: v.bookings
+    }));
+  };
+
+  const recentEarnings = getRecentDailyEarnings();
 
   return (
     <div className="space-y-8">
@@ -531,9 +690,11 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Overall Occupancy</span>
-                    <span className="text-sm font-semibold text-purple-600">67%</span>
+                    <span className="text-sm font-semibold text-purple-600">
+                      {stats.activeSpaces > 0 ? Math.min(100, (stats.monthlyBookings / (stats.activeSpaces * 10)) * 100).toFixed(0) : 0}%
+                    </span>
                   </div>
-                  <Progress value={67} className="h-2" />
+                  <Progress value={stats.activeSpaces > 0 ? (stats.monthlyBookings / (stats.activeSpaces * 10)) * 100 : 0} className="h-2" />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -555,9 +716,9 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Monthly Goal</span>
-                    <span className="text-sm font-semibold text-green-600">$2,847 / $3,000</span>
+                    <span className="text-sm font-semibold text-green-600">${stats.monthlyEarnings.toFixed(0)} / $5,000</span>
                   </div>
-                  <Progress value={94.9} className="h-2" />
+                  <Progress value={(stats.monthlyEarnings / 5000) * 100} className="h-2" />
                 </div>
               </div>
             </Card>
@@ -810,6 +971,156 @@ export function SpaceOwnerDashboard({ onNavigate, defaultTab = 'overview' }: Spa
                             <XCircle className="w-4 h-4 mr-2" />
                             Decline
                           </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Active Spots Section */}
+          <Card className="glass-card professional-shadow-lg border-0">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900">Active Ongoing Spots</h3>
+                  <p className="text-gray-600">Currently active bookings in your parking spaces</p>
+                </div>
+                <Badge variant="secondary" className="bg-green-100 text-green-700">
+                  {activeBookings.length} active
+                </Badge>
+              </div>
+            </div>
+            <div className="p-6">
+              {activeBookings.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No active bookings</div>
+              ) : (
+                <div className="space-y-4">
+                  {activeBookings.map((booking) => (
+                    <div key={booking.id} className="border border-green-200 bg-green-50/50 rounded-xl p-6 hover:bg-green-50 transition-colors">
+                      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 bg-gradient-to-r from-green-100 to-emerald-100 rounded-xl flex items-center justify-center">
+                              <Car className="w-6 h-6 text-green-600" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="font-semibold text-gray-900">{booking.renterName}</h4>
+                                <div className="flex items-center gap-1">
+                                  <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                                  <span className="text-sm text-gray-600">{booking.renterRating}</span>
+                                </div>
+                                <Badge className="bg-green-600 text-white">Active</Badge>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+                                <div>
+                                  <span className="font-medium">Space:</span> {booking.spaceName}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Vehicle:</span> {booking.vehicleType}
+                                </div>
+                                <div>
+                                  <span className="font-medium">License Plate:</span> {booking.licensePlate}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Duration:</span> {booking.duration}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Start:</span> {booking.startTime}
+                                </div>
+                                <div>
+                                  <span className="font-medium">End:</span> {booking.endTime}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 mt-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-600">Earning:</span>
+                                  <span className="font-semibold text-green-600">{booking.amount}</span>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Confirmed {booking.confirmedTime}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Past Spots Section */}
+          <Card className="glass-card professional-shadow-lg border-0">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900">Past Completed Spots</h3>
+                  <p className="text-gray-600">Bookings that have ended</p>
+                </div>
+                <Badge variant="secondary" className="bg-gray-100 text-gray-700">
+                  {pastBookings.length} completed
+                </Badge>
+              </div>
+            </div>
+            <div className="p-6">
+              {pastBookings.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No past bookings</div>
+              ) : (
+                <div className="space-y-4">
+                  {pastBookings.map((booking) => (
+                    <div key={booking.id} className="border border-gray-200 bg-gray-50/50 rounded-xl p-6 hover:bg-gray-50 transition-colors">
+                      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 bg-gradient-to-r from-gray-100 to-gray-200 rounded-xl flex items-center justify-center">
+                              <CheckCircle className="w-6 h-6 text-gray-600" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="font-semibold text-gray-900">{booking.renterName}</h4>
+                                <div className="flex items-center gap-1">
+                                  <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                                  <span className="text-sm text-gray-600">{booking.renterRating}</span>
+                                </div>
+                                <Badge className="bg-gray-600 text-white">Completed</Badge>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+                                <div>
+                                  <span className="font-medium">Space:</span> {booking.spaceName}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Vehicle:</span> {booking.vehicleType}
+                                </div>
+                                <div>
+                                  <span className="font-medium">License Plate:</span> {booking.licensePlate}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Duration:</span> {booking.duration}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Started:</span> {booking.startTime}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Ended:</span> {booking.endTime}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4 mt-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-gray-600">Earned:</span>
+                                  <span className="font-semibold text-gray-900">{booking.amount}</span>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  Confirmed {booking.confirmedTime}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

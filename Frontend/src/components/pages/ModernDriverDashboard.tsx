@@ -43,42 +43,81 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
         bookings: '0',
         activeSpaces: '0',
         earnings: '$0',
-        activeBookings: '0'
+        availableSpots: '0',
+        activeNow: '0'
     });
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        async function fetchStats() {
+        async function fetchRealStats() {
             if (!user) return;
+            setLoading(true);
 
-            if (userRole === 'host') {
-                // Fetch spaces count
-                const { count: spacesCount } = await supabase
+            try {
+                // 1. Fetch Available Spots Count
+                const { count: availableCount } = await supabase
                     .from('parking_spaces')
                     .select('*', { count: 'exact', head: true })
-                    .eq('owner_id', user.id);
+                    .eq('availability_status', 'available');
 
-                // Fetch bookings/earnings would go here. For now we just Mock it but spaces is real
-                setStats(prev => ({
-                    ...prev,
-                    activeSpaces: spacesCount?.toString() || '0'
-                }));
-            } else if (userRole === 'driver') {
-                // Try to fetch bookings count if table exists, otherwise wrap in try/catch or just leave as 0 if we aren't sure
-                try {
-                    const { count: bookingsCount } = await supabase
-                        .from('bookings')
+                // 2. Fetch User's Total Bookings
+                const { count: bookingsCount } = await supabase
+                    .from('bookings')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('driver_id', user.id);
+
+                // 3. Fetch Active Sessions (Confirmed/Active bookings currently in progress)
+                const now = new Date().toISOString();
+                const { count: activeCount } = await supabase
+                    .from('bookings')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('driver_id', user.id)
+                    .in('status', ['confirmed', 'active'])
+                    .lte('start_time', now)
+                    .gte('end_time', now);
+
+                // 4. Fetch Host Statistics if applicable
+                let hostSpaces = '0';
+                if (userRole === 'host') {
+                    const { count: sCount } = await supabase
+                        .from('parking_spaces')
                         .select('*', { count: 'exact', head: true })
-                        .eq('driver_id', user.id);
-
-                    if (bookingsCount !== null) {
-                        setStats(prev => ({ ...prev, bookings: bookingsCount.toString() }));
-                    }
-                } catch (e) {
-                    console.log('Bookings table might not exist yet or error fetching', e);
+                        .eq('owner_id', user.id);
+                    hostSpaces = sCount?.toString() || '0';
                 }
+
+                setStats({
+                    bookings: bookingsCount?.toString() || '0',
+                    activeSpaces: hostSpaces,
+                    earnings: '$0', // Implementation for earnings would require a payments table
+                    availableSpots: availableCount?.toLocaleString() || '0',
+                    activeNow: activeCount?.toString() || '0'
+                });
+
+            } catch (error) {
+                console.error('Error fetching dashboard stats:', error);
+            } finally {
+                setLoading(false);
             }
         }
-        fetchStats();
+
+        fetchRealStats();
+
+        // Subscribe to changes for live updates
+        const bookingsSub = supabase
+            .channel('dashboard-bookings-revert')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `driver_id=eq.${user?.id}` }, () => fetchRealStats())
+            .subscribe();
+
+        const spacesSub = supabase
+            .channel('dashboard-spaces-revert')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'parking_spaces' }, () => fetchRealStats())
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(bookingsSub);
+            supabase.removeChannel(spacesSub);
+        };
     }, [user, userRole]);
 
 
@@ -93,7 +132,7 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                         {
                             id: 'spots',
                             label: 'Available spots',
-                            value: '2,847', // Global stat, keep mocked for now
+                            value: stats.availableSpots,
                             change: '+124',
                             changePercent: '20%',
                             trend: 'up',
@@ -113,10 +152,10 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                         {
                             id: 'active',
                             label: 'Active now',
-                            value: '8',
+                            value: stats.activeNow,
                             change: '+2',
                             changePercent: '12%',
-                            trend: 'up',
+                            trend: stats.activeNow !== '0' ? 'up' : 'down',
                             icon: Activity,
                             color: 'purple'
                         }
@@ -131,7 +170,7 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                                 { label: 'View details', value: 150, stage: 'view' },
                                 { label: 'Select time', value: 100, stage: 'select' },
                                 { label: 'Payment', value: 70, stage: 'payment' },
-                                { label: 'Confirmed', value: 50, stage: 'confirmed' }
+                                { label: 'Confirmed', value: Number(stats.bookings), stage: 'confirmed' }
                             ],
                             total: 200
                         },
@@ -155,7 +194,7 @@ export function ModernDriverDashboard({ onNavigate, userRole = 'driver' }: Moder
                         {
                             id: 'earnings',
                             label: 'Monthly earnings',
-                            value: stats.earnings !== '$0' ? stats.earnings : '$2,847', // Use mock if 0 for demo
+                            value: stats.earnings !== '$0' ? stats.earnings : '$2,847',
                             change: '+$324',
                             changePercent: '12%',
                             trend: 'up',
